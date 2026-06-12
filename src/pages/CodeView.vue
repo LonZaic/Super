@@ -87,150 +87,31 @@
         </div>
       </div>
 
-      <!-- ═══ Messages — Agent-style step cards ═══ -->
-      <div class="cv-chat-msgs" ref="chatRef">
-        <template v-for="m in codeMessages" :key="m._id">
-          <!-- User message -->
-          <div v-if="m.role === 'user'" class="cv-msg cv-msg-user">
-            <div class="cv-bubble cv-bubble-user">{{ m.text }}</div>
-          </div>
-          <!-- AI message: step card -->
-          <div v-else class="cv-card" :class="{ running: m._running, done: m._done }">
-            <!-- Collapsed header -->
-            <button class="cv-card-hdr" @click="m._expanded = !m._expanded">
-              <span class="cv-card-hdr-l">
-                <svg v-if="m._running" class="cv-card-spin" width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <circle cx="6.5" cy="6.5" r="5" stroke="var(--text3)" stroke-width="1" opacity=".25"/>
-                  <path d="M11.5 6.5a5 5 0 00-4-4.8" stroke="var(--accent)" stroke-width="1.1" stroke-linecap="round"/>
-                </svg>
-                <svg v-else-if="m._error" width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <circle cx="6.5" cy="6.5" r="5.5" stroke="var(--red)" stroke-width="1"/>
-                  <path d="M4.5 4.5l4 4M8.5 4.5l-4 4" stroke="var(--red)" stroke-width="1.1" stroke-linecap="round"/>
-                </svg>
-                <svg v-else width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <circle cx="6.5" cy="6.5" r="5.5" stroke="var(--green)" stroke-width="1"/>
-                  <path d="M4 6.5l1.8 1.8 3.2-3.5" stroke="var(--green)" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span class="cv-card-label">SuperDS</span>
-                <span class="cv-card-dash">&#8212;</span>
-                <span class="cv-card-sum">{{ m._summary }}</span>
-              </span>
-              <span class="cv-card-hdr-r">
-                <span class="cv-card-timer">{{ m._timer }}</span>
-                <svg class="cv-card-chev" :class="{ open: m._expanded }" width="11" height="11" viewBox="0 0 11 11" fill="none">
-                  <path d="M3 4l2.5 2.5L8 4" stroke="var(--text3)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </span>
-            </button>
-
-            <!-- Expanded body: sequential think → act → report (like chat mode) -->
-            <div v-if="m._expanded" class="cv-card-body">
-              <!-- Thinking process — ALWAYS visible while running, exact chat-mode design -->
-              <div v-if="m._running" class="cv-think-live">
-                <div class="cv-think-live-hdr" @click="m._thinkOpen = !m._thinkOpen">
-                  <svg class="cv-think-dot" width="7" height="7" viewBox="0 0 7 7" fill="none"><circle cx="3.5" cy="3.5" r="2.5" fill="var(--accent)" opacity=".7"/></svg>
-                  <span class="cv-think-live-label">思考中</span>
-                  <svg :class="['cv-think-chev', { open: m._thinkOpen !== false }]" width="10" height="10" viewBox="0 0 10 10" fill="none" style="margin-left:auto">
-                    <path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </div>
-                <div v-if="m._thinkOpen !== false" class="cv-think-body markdown-body"
-                  v-html="renderMd(m._streaming || '思考中...')"
-                  @scroll="onThinkScroll($event)"></div>
-              </div>
-
-              <!-- Flat sequential steps: think → tool → report → think → tool → report -->
-              <template v-for="(s, si) in m._flatSteps" :key="'s' + si">
-                <!-- Plan / Error banner -->
-                <div v-if="s._type === 'plan' || s._type === 'error'" class="cv-step-banner"
-                  :class="{ 'cv-step-err': s._type === 'error' }">{{ s._text }}</div>
-
-                <!-- Thinking block — collapsible, same design as chat mode -->
-                <div v-if="s._type === 'think'" class="cv-think-block"
-                  :class="{ 'cv-think-live': s._live }">
-                  <div class="cv-think-block-hdr" @click="s._open = !s._open">
-                    <svg :class="['cv-think-chev', { open: s._open !== false }]" width="10" height="10" viewBox="0 0 10 10" fill="none">
-                      <path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                    <span class="cv-think-block-label">思考</span>
-                  </div>
-                  <div v-if="s._open !== false" class="cv-think-block-body markdown-body" v-html="renderMd(s._text)"></div>
-                </div>
-
-                <!-- Tool row -->
-                <div v-if="s._type === 'tool'" class="cv-step" @click="s._open = !s._open">
-                  <div class="cv-step-row">
-                    <svg v-if="s._live" class="cv-step-spin" width="13" height="13" viewBox="0 0 13 13" fill="none">
-                      <circle cx="6.5" cy="6.5" r="5" stroke="var(--text3)" stroke-width="1" opacity=".25"/>
-                      <path d="M11.5 6.5a5 5 0 00-4-4.8" stroke="var(--accent)" stroke-width="1.1" stroke-linecap="round"/>
-                    </svg>
-                    <svg v-else width="13" height="13" viewBox="0 0 13 13" fill="none" class="cv-step-ok">
-                      <circle cx="6.5" cy="6.5" r="5.5" stroke="var(--green)" stroke-width=".8" opacity=".5"/>
-                      <path d="M4 6.5l1.8 1.8 3.2-3.5" stroke="var(--green)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                    <span class="cv-step-phrase" :class="{ sweep: s._live }">{{ s._phrase }}</span>
-                    <span v-if="s._file" class="cv-step-file">{{ s._file }}</span>
-                    <span class="cv-step-tool">{{ s._tool }}</span>
-                    <svg v-if="s._detail" class="cv-step-chev" :class="{ open: s._open }" width="9" height="9" viewBox="0 0 9 9" fill="none">
-                      <path d="M2.5 3L4.5 5l2-2" stroke="var(--text3)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </div>
-                  <div v-if="s._open && s._detail" class="cv-step-detail"><code class="cv-step-code">{{ s._detail }}</code></div>
-                </div>
-
-                <!-- Report text — markdown rendered -->
-                <div v-if="s._type === 'report'" class="cv-report markdown-body" v-html="renderMd(s._text)"></div>
-              </template>
-
-              <!-- Streaming final report -->
-              <div v-if="m._reportStream && m._running" class="cv-think-live cv-report-live">
-                <div class="cv-think-live-hdr">
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="var(--green)" stroke-width="1"/><path d="M4 6l1.5 1.5L9 5" stroke="var(--green)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  <span class="cv-think-live-label" style="color:var(--green)">最终汇报</span>
-                </div>
-                <div class="cv-think-live-body markdown-body" v-html="renderMd(m._reportStream)"></div>
-              </div>
-
-              <div v-if="m._running" class="cv-scan"></div>
-
-              <!-- Handoff — offer to continue in new session -->
-              <div v-if="m._handoffReady" class="cv-handoff">
-                <div class="cv-handoff-icon">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 6l4 4 4-4" stroke="var(--accent)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke="var(--accent)" stroke-width="1.3" stroke-linecap="round"/></svg>
-                </div>
-                <div class="cv-handoff-text">
-                  <span class="cv-handoff-title">上下文已用 {{ m._handoffPct || '80' }}%</span>
-                  <span class="cv-handoff-desc">接力文档已生成（Follow.md + Task.md + Keep.md），新对话可直接继续</span>
-                </div>
-                <button class="cv-handoff-btn" @click="startHandoffSession(m)" :disabled="loading">
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M2 6h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                  新对话继续
-                </button>
-              </div>
-
-              <!-- Task plan — collapsible, auto-collapse when all done -->
-              <div v-if="m._todos && m._todos.length" class="cv-todos">
-                <div class="cv-todos-hdr" @click="toggleTodosOpen(m)" style="cursor:pointer">
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5l2 2 5-5" stroke="var(--green)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  <span>任务计划 ({{ m._todos.filter(t => t.status === 'completed').length }}/{{ m._todos.length }})</span>
-                  <svg :class="['cv-think-chev', { open: m._todosOpen !== false }]" width="10" height="10" viewBox="0 0 10 10" fill="none" style="margin-left:auto">
-                    <path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </div>
-                <div v-if="m._todosOpen !== false">
-                <div v-for="t in m._todos" :key="t.id" class="cv-todo-item" :class="{ done: t.status === 'completed', active: t.status === 'in_progress' }">
-                  <svg v-if="t.status === 'completed'" width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="var(--green)" stroke-width=".8"/><path d="M3.5 5.5l1.3 1.3 2.7-2.7" stroke="var(--green)" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  <svg v-else-if="t.status === 'in_progress'" width="11" height="11" viewBox="0 0 11 11" fill="none" class="cv-todo-spin"><circle cx="5.5" cy="5.5" r="4" stroke="var(--accent)" stroke-width=".8" opacity=".3"/><path d="M9.5 5.5a4 4 0 00-3.2-3.9" stroke="var(--accent)" stroke-width=".9" stroke-linecap="round"/></svg>
-                  <svg v-else width="11" height="11" viewBox="0 0 11 11" fill="none"><circle cx="5.5" cy="5.5" r="4.5" stroke="var(--text3)" stroke-width=".8"/></svg>
-                  <span class="cv-todo-text">{{ t.text }}</span>
-                </div>
-                </div> <!-- end v-if todosOpen -->
-              </div>
-
+      <!-- ═══ Messages — compact 3-line output ═══ -->
+      <div class="cv-chat-msgs" ref="chatRef" @scroll="onChatScroll">
+        <template v-for="m in store.messages" :key="m._id || m.id">
+          <template v-if="!m._isRoundMarker">
+            <!-- User message -->
+            <div v-if="m.role === 'user'" class="cv-msg cv-msg-user">
+              <div class="cv-bubble cv-bubble-user">{{ m.text }}</div>
             </div>
-          </div>
+            <!-- AI message: compact -->
+            <template v-else>
+              <CodeAgentCompact
+                :message="m"
+                :yammy-active="yammy.msgId === (m._id || m.id)"
+                :yammy-playing="yammy.playing"
+                :yammy-shaking="yammy.shaking"
+                @yammy-click="onYammyClick"
+              />
+              <!-- Final report — always visible when AI is done -->
+              <div v-if="m._done && m.text" class="cv-report">
+                <div class="cv-report-text markdown-body" v-html="m.html || renderMd(m.text)"></div>
+              </div>
+            </template>
+          </template>
         </template>
-        <div v-if="!codeMessages.length && store.currentId" class="cv-chat-hint">
+        <div v-if="!store.messages.filter(m => !m._isRoundMarker).length && store.currentId" class="cv-chat-hint">
           {{ t('codeChatHint') }}
         </div>
       </div>
@@ -392,14 +273,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUpdated, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useCodeStore } from '../stores/codeStore.js'
 import { renderMarkdown, reinitMermaid } from '../utils/markdown.js'
 import { scanFileTree, readFileContent, newProject, runCodeAgent } from '../api/code.api.js'
 import { BASE_URL } from '../api/client.js'
 import { getApiHeaders } from '../utils/apiHeaders.js'
 import { useI18n } from '../composables/useI18n.js'
-import { getAgentPhrase } from '../utils/agentPhrases.js'
+import { createCompactState, mutateCompactState } from '../utils/codeCompact.js'
+import CodeAgentCompact from '../components/code/CodeAgentCompact.vue'
 import TokenBar from '../components/common/TokenBar.vue'
 import hljs from 'highlight.js'
 window.hljs = hljs
@@ -503,158 +385,28 @@ try {
   if (saved) chatWidth.value = parseInt(saved) || 360
 } catch {}
 
-// ─── Enhanced message list with step cards ───
-const codeMessages = computed(() => {
-  const raw = store.messages
-  return raw.filter(m => !m._isRoundMarker).map(m => {
-    if (m.role !== 'ai') return m
-    // Only build step cards for new agent-style messages; old ones stay as plain bubbles
-    const hasEvents = m._events && m._events.length > 0
-    if (!hasEvents) {
-      // Old message from DB — show clean completed card
-      return {
-        ...m,
-        _steps: [],
-        _summary: '任务完成',
-        _running: false,
-        _done: true,
-        _error: false,
-        _expanded: true,
-        _thinkOpen: false,
-        _timer: '',
-        _reportStream: '',
-        thinking: m.thinking || '',
-      }
-    }
-    const events = m._events || []
-    const flatSteps = buildFlatSteps(events)
-
-    // Dynamic summary based on current state
-    let summary
-    if (m._error) {
-      summary = '出错了'
-    } else if (m._done) {
-      const lastReport = [...flatSteps].reverse().find(s => s._type === 'report')
-      summary = lastReport?._text?.slice(0, 50) || '任务完成'
-    } else if (m._reportStream) {
-      summary = '写汇报中...'
-    } else if (m._streaming) {
-      summary = '思考中...'
-    } else {
-      const lastLive = [...flatSteps].reverse().find(s => s._live)
-      summary = lastLive ? lastLive._phrase : '分析中...'
-    }
-
-    return {
-      ...m,
-      _flatSteps: flatSteps,
-      _groups: flatSteps,  // keep for backward compat
-      _streaming: m._streaming || '',
-      _reportStream: m._reportStream || '',
-      _summary: summary,
-      _running: m._done === false && !m._error,
-      _done: m._done !== false,
-      _error: !!m._error,
-      _expanded: m._expanded !== false,
-      _thinkOpen: m._thinkOpen !== false,
-      _todosOpen: m._todosOpen !== false,  // collapsed by default when all done
-    }
-  })
+// ─── Yammy mascot state (mirrors ChatView pattern) ───
+const yammy = reactive({
+  msgId: null,
+  playing: false,
+  clickCount: 0,
+  shaking: false,
+  _playTimer: null,
 })
 
-// ─── Build flat sequential steps (like chat mode / Cursor) ═══
-function buildFlatSteps(events) {
-  if (!events || !events.length) return []
-  const steps = []
-  let curThink = ''
-  let lastThinkIdx = -1
-
-  function flushThink() {
-    if (curThink.trim()) {
-      // New thinking always opens expanded so user sees it
-      // Previous thinking auto-collapses
-      if (lastThinkIdx >= 0 && steps[lastThinkIdx]) {
-        steps[lastThinkIdx]._open = false
-      }
-      steps.push({ _type: 'think', _text: curThink.trim(), _live: false, _open: true })
-      lastThinkIdx = steps.length - 1
-    }
-    curThink = ''
+function onYammyClick() {
+  if (!yammy.msgId) return
+  yammy.clickCount++
+  if (yammy.clickCount >= 10) {
+    yammy.shaking = true
+    yammy.clickCount = 0
+    setTimeout(() => { yammy.shaking = false }, 600)
+    return
   }
-
-  for (const e of events) {
-    if (e.type === 'step_thinking' && e.text) {
-      curThink += e.text
-    }
-    if (e.type === 'step_thinking_done') {
-      flushThink()
-    }
-    if (e.type === 'tool_start') {
-      flushThink()
-      const a = e.args || {}
-      const detail = a.path || a.pattern || a.query || a.command || a.dir || ''
-      const toolName = (e.tool || '')
-      const fileName = a.path ? a.path.split('\\').pop().split('/').pop() : ''
-      steps.push({
-        _type: 'tool', _tool: toolName.replace(/_/g, ' '), _file: fileName,
-        _detail: detail || (Object.keys(a).length ? JSON.stringify(a).slice(0, 200) : ''),
-        _phrase: getAgentPhrase(toolName, 'active', toolName),
-        _live: true, _open: false,
-      })
-      // Collapse previous thinking when tools start
-      if (lastThinkIdx >= 0 && steps[lastThinkIdx]) {
-        steps[lastThinkIdx]._open = false
-      }
-    }
-    if (e.type === 'tool_result') {
-      for (let i = steps.length - 1; i >= 0; i--) {
-        if (steps[i]._type === 'tool' && steps[i]._live) {
-          steps[i]._live = false
-          const tn = steps[i]._tool.replace(/ /g, '_')
-          steps[i]._phrase = getAgentPhrase(tn, 'done', tn)
-          if (!steps[i]._detail && e.result) steps[i]._detail = String(e.result).slice(0, 250)
-          break
-        }
-      }
-    }
-    if (e.type === 'step_report' && e.text) {
-      flushThink()
-      steps.push({ _type: 'report', _text: e.text })
-    }
-    if (e.type === 'planning') {
-      steps.push({ _type: 'plan', _text: e.text || '正在规划任务...' })
-    }
-    if (e.type === 'plan_done') {
-      flushThink()
-      steps.push({ _type: 'plan', _text: e.quickMode ? '分析模式' : '规划完成，开始执行' })
-    }
-    if (e.type === 'plan_reused') {
-      flushThink()
-      steps.push({ _type: 'plan', _text: `沿用已有计划（剩余 ${e.pendingCount || 0} 步）` })
-    }
-    if (e.type === 'error') {
-      steps.push({ _type: 'error', _text: e.text || '未知错误' })
-    }
-  }
-  flushThink()
-  return steps
+  yammy.playing = true
+  clearTimeout(yammy._playTimer)
+  yammy._playTimer = setTimeout(() => { yammy.playing = false }, 1800)
 }
-
-function hintForCode(tool, args) {
-  const map = {
-    list_files: '巡视项目结构',
-    read_file: '仔细阅读文件内容',
-    write_file: '正在创建新文件',
-    write_to_file: '正在创建新文件',
-    edit_file: '精确修改代码',
-    grep: '搜索代码中',
-    glob: '查找文件',
-    run_command: '执行命令',
-    bash: '执行命令',
-  }
-  return map[tool] || ''
-}
-
 const activeFile = computed(() =>
   store.openFiles.find(f => f.path === store.activeFilePath)
 )
@@ -776,12 +528,12 @@ onMounted(() => {
   if (store.projectPath) loadProject(store.projectPath)
   loadCodeTokens()  // restore persisted token counters
   fetchBalance()
-  nextTick(() => { scrollDown() })
+  nextTick(() => { scrollChatToBottom(true) })
 })
 
 // Scroll to bottom when switching conversations
 watch(() => store.currentId, () => {
-  nextTick(() => { scrollDown() })
+  nextTick(() => { scrollChatToBottom(true) })
 })
 
 watch(() => store.activeFilePath, async (fp) => {
@@ -890,50 +642,6 @@ function refreshFileTree() {
     } catch {}
   }, 500)
 }
-function startHandoffSession(msg) {
-  // Create a new conversation that will pick up Follow.md + Task.md + Keep.md
-  const title = (task.value || '继续任务').slice(0, 30)
-  store.createConversation(title)
-  // The next agent run will detect isHandoff=true and inject all three docs
-  // Clear handoff flag for the new card
-  msg._handoffReady = false
-  scrollDown()
-}
-
-function toggleTodosOpen(msg) {
-  // Toggle on the original reactive message so Vue tracks it
-  const id = msg._id
-  const msgs = store.messages
-  const orig = msgs.find(m => m._id === id)
-  if (orig) {
-    orig._todosOpen = orig._todosOpen === false ? true : false
-  }
-}
-
-function onThinkScroll(e) {
-  const el = e.target
-  // If user scrolled away from bottom (>30px), mark as user-scrolled
-  const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-  if (distFromBottom > 30) {
-    el._userScrolled = true
-  } else {
-    el._userScrolled = false
-  }
-}
-
-function scrollDown() {
-  nextTick(() => {
-    if (chatRef.value) chatRef.value.scrollTop = chatRef.value.scrollHeight
-    // Auto-scroll think body to bottom (unless user manually scrolled up)
-    const thinkBodies = document.querySelectorAll('.cv-think-body')
-    thinkBodies.forEach(el => {
-      if (el._userScrolled) return
-      el.scrollTop = el.scrollHeight
-    })
-    reinitMermaid()
-  })
-}
-
 const showSwitch = ref(false)
 function newCodeConv() { store.createConversation('Code 对话') }
 function doSwitchProject() {
@@ -963,7 +671,6 @@ function autoResize() {
 }
 
 let _abortCtrl = null
-let _timerInterval = null
 
 // ═══ Image upload (code mode — images only) ═══
 function onPasteImages(e) {
@@ -1012,7 +719,7 @@ async function send() {
 
   if (!store.currentId) store.createConversation(txt.slice(0, 30))
   store.tasks = []
-  tokPrompt.value = 0; tokComp.value = 0; tokTotal.value = 0  // reset token counter
+  tokPrompt.value = 0; tokComp.value = 0; tokTotal.value = 0
 
   // Include images in task
   const imgs = pendingImages.value
@@ -1025,21 +732,24 @@ async function send() {
   store.addUserMessage(displayText)
   pendingImages.value = []
 
-  const startTime = Date.now()
-  const dbId = store.addAiMessage('', '', '', '[]', '[]', false, false, '0s')
+  const dbId = store.addAiMessage('', '', '', '[]', '[]', false, false, '')
   const aiMsg = reactive({
     _id: 'a_' + Date.now(), role: 'ai', text: '', html: '', thinking: '',
-    _events: [], _done: false, _error: false, _expanded: true, _thinkOpen: true, _timer: '0s',
-    _streaming: ''  // live streaming thinking text
+    _events: [], _done: false, _error: false,
+    _compactState: createCompactState(),
+    _todos: [],
+    _todosOpen: true,
   })
   store.pushMessage(aiMsg)
-  scrollDown()
 
-  // Timer & periodic DB save
-  _timerInterval = setInterval(() => {
-    const s = Math.floor((Date.now() - startTime) / 1000)
-    aiMsg._timer = s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's'
-  }, 1000)
+  // Activate yammy
+  yammy.msgId = aiMsg._id
+  yammy.playing = true
+  yammy.clickCount = 0
+  yammy.shaking = false
+
+  _userScrolled = false
+  scrollChatToBottom(true)
 
   _abortCtrl = new AbortController()
   let _saveDirty = false
@@ -1047,9 +757,8 @@ async function send() {
     if (!_saveDirty || dbId < 0) return
     _saveDirty = false
     store.updateMessageText(dbId, aiMsg.text, aiMsg.html, aiMsg.thinking,
-      JSON.stringify(aiMsg._events), aiMsg._done ? 1 : 0, aiMsg._error ? 1 : 0, aiMsg._timer)
+      JSON.stringify(aiMsg._events), aiMsg._done ? 1 : 0, aiMsg._error ? 1 : 0, '')
   }
-  // Save to DB every 5 seconds
   const _dbInterval = setInterval(_saveToDb, 5000)
 
   try {
@@ -1085,7 +794,6 @@ async function send() {
         } catch {}
     }
 
-    // Only reuse plan if there are PENDING tasks. All-done → fresh plan.
     const pendingCount = (store.tasks || []).filter(t => !t.done).length
     const existingPlan = pendingCount > 0
       ? store.tasks.map(t => ({ id: t.id, text: t.text, done: !!t.done }))
@@ -1095,33 +803,10 @@ async function send() {
       aiMsg._events.push(e)
       _saveDirty = true
 
-      if (e.type === 'start') {
-        aiMsg._streaming = (aiMsg._streaming || '') + '正在分析任务...\n\n'
-        aiMsg._thinkOpen = true
-      }
-      if (e.type === 'planning' && e.text) {
-        aiMsg._streaming = (aiMsg._streaming || '') + e.text + '\n'
-        aiMsg._thinkOpen = true
-      }
-      if (e.type === 'streaming' && e.text) {
-        // Replace with latest full content (server sends accumulated text)
-        aiMsg._streaming = e.text
-        aiMsg._thinkOpen = true
-      }
-      if (e.type === 'step_thinking_done') {
-        // Keep streaming visible — just mark phase boundary, don't clear
-        // Content stays in the think box until task is done
-      }
-      if (e.type === 'thinking' && e.text) {
-        aiMsg.thinking = (aiMsg.thinking || '') + e.text
-        aiMsg._thinkOpen = true
-      }
-      if (e.type === 'report_stream' && e.text) {
-        // Final report streaming — show in real-time, clear thinking stream
-        aiMsg._reportStream = e.text
-        aiMsg._streaming = ''
-        aiMsg._thinkOpen = false
-      }
+      // ─── Mutate compact state directly (no recomputation) ───
+      mutateCompactState(aiMsg._compactState, e)
+
+      // ─── Keep legacy state for detail panel ───
       if (e.type === 'code_diff') {
         store.addDiff({
           filePath: e.filePath,
@@ -1136,85 +821,59 @@ async function send() {
           const { content } = await readFileContent(e.filePath, store.projectPath)
           store.updateFileContent(e.filePath, content)
         } catch {}
-        refreshFileTree()  // update file tree in real-time
+        refreshFileTree()
       }
       if (e.type === 'plan_done' && e.tasks) {
         store.setTasks(e.tasks)
-        // Only show task plan for multi-step plans (>1 task). Single-task = analysis mode, no plan UI.
         if (e.tasks.length > 1) {
           aiMsg._todos = e.tasks.map(t => ({ id: t.id, text: t.text, status: t.done ? 'completed' : 'pending' }))
         }
       }
       if (e.type === 'plan_reused' && e.tasks) {
         store.setTasks(e.tasks)
-        // Only show plan UI for multi-step plans
         if (e.tasks.length > 1) {
           aiMsg._todos = e.tasks.map(t => ({ id: t.id, text: t.text, status: t.done ? 'completed' : 'pending' }))
         }
       }
       if (e.type === 'task_done' && e.taskId) {
         store.markTaskDone(e.taskId)
-        // Check off in todo list
         if (aiMsg._todos) {
           const td = aiMsg._todos.find(t => t.id === e.taskId)
           if (td) td.status = 'completed'
         }
       }
       if (e.type === 'task_start' && e.taskId) {
-        // Mark current task as in_progress in todo list
         if (aiMsg._todos) {
           const td = aiMsg._todos.find(t => t.id === e.taskId)
           if (td) td.status = 'in_progress'
         }
       }
-
       if (e.type === 'done') {
         aiMsg._done = true
-        aiMsg._todosOpen = false  // auto-collapse task plan
-        aiMsg._thinkOpen = false  // auto-collapse last thinking
-        // Clear all streaming state
-        aiMsg._streaming = ''
-        aiMsg._reportStream = ''
+        aiMsg._todosOpen = false
         if (e.text) {
           aiMsg.text = e.text
           aiMsg.html = renderMarkdown(e.text)
-          // If we had a streaming report, use it as final and clear stream
-          if (!aiMsg._reportStream) aiMsg._reportStream = e.text
         }
-        aiMsg._thinkOpen = false
-        // Persist todos
         if (e.todos && e.todos.length) {
           aiMsg._todos = e.todos
         }
-      }
-      if (e.type === 'subagent_start') {
-        aiMsg.thinking = (aiMsg.thinking || '') + '\n[子Agent启动: ' + (e.text || '').slice(0, 30) + ']'
-        aiMsg._thinkOpen = true
-      }
-      if (e.type === 'subagent_done') {
-        aiMsg.thinking = (aiMsg.thinking || '') + '\n[子Agent完成]'
+        yammy.playing = false
       }
       if (e.type === 'token_usage') {
         tokPrompt.value = e.promptTokens || 0
         tokComp.value = e.completionTokens || 0
         tokTotal.value = e.totalTokens || 0
       }
-      if (e.type === 'handoff_ready') {
-        aiMsg._handoffReady = true
-        aiMsg._handoffTokens = e.tokens
-        aiMsg._handoffPct = e.pct
-        aiMsg._thinkOpen = true
-      }
       if (e.type === 'context_usage' && e.pct >= 80) {
-        aiMsg.thinking = (aiMsg.thinking || '') + '\n[上下文 ' + e.pct + '%]'
-        if (e.handoffReady) aiMsg._handoffReady = true
-        aiMsg._thinkOpen = true
+        aiMsg._handoffReady = e.handoffReady || false
       }
       if (e.type === 'error') {
         aiMsg._error = true
         aiMsg.html = renderMarkdown('**出错**: ' + (e.text || '未知'))
+        yammy.playing = false
       }
-      await nextTick(); scrollDown()
+      scrollChatToBottom() // respect user scroll
     }, _abortCtrl.signal, existingPlan)
   } catch (e) {
     if (e.name === 'AbortError') {
@@ -1224,16 +883,47 @@ async function send() {
       aiMsg._error = true
       aiMsg.html = renderMarkdown('**出错**: ' + (e.message || '未知'))
     }
+    yammy.playing = false
   }
 
-  clearInterval(_timerInterval)
   clearInterval(_dbInterval)
   aiMsg._done = true
   loading.value = false
   _abortCtrl = null
   _saveToDb()
   if (store.projectPath) loadProject(store.projectPath)
-  scrollDown()
+  scrollChatToBottom()
+}
+
+// ─── Scroll — respect user scroll position ───
+let _userScrolled = false
+let _scrollTimer = null
+
+function onChatScroll() {
+  const el = chatRef.value
+  if (!el) return
+  const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+  // If user scrolled back to bottom (< 4px), resume auto-scroll
+  if (dist < 4) {
+    _userScrolled = false
+    return
+  }
+  // If user scrolled up significantly, stop auto-scroll
+  if (dist > 30) {
+    _userScrolled = true
+    // Reset after 8 seconds of no scrolling
+    clearTimeout(_scrollTimer)
+    _scrollTimer = setTimeout(() => { _userScrolled = false }, 8000)
+  }
+}
+
+function scrollChatToBottom(force = false) {
+  nextTick(() => {
+    const el = chatRef.value
+    if (!el) return
+    if (!force && _userScrolled) return
+    el.scrollTop = el.scrollHeight
+  })
 }
 </script>
 
@@ -1303,118 +993,17 @@ async function send() {
 .cv-bubble-user { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); max-width: 85%; }
 .cv-chat-hint { padding: 20px 0; text-align: center; font-size: 12px; color: var(--text3); font-weight: 300; }
 
-/* ─── Agent-style step cards ─── */
-.cv-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); overflow: hidden; margin-bottom: 8px; transition: border-color .3s; }
-.cv-card.running { border-color: rgba(79,125,255,.2); }
-.cv-card.done { border-color: rgba(63,185,80,.12); }
-.cv-card-hdr { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 7px 10px; gap: 8px; background: none; border: none; color: var(--text2); font: 300 12px var(--font-sans); cursor: pointer; text-align: left; transition: background .12s; }
-.cv-card-hdr:hover { background: var(--bg3); }
-.cv-card-hdr-l { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.cv-card-hdr-r { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.cv-card-label { font-weight: 500; color: var(--text); font-size: 13px; flex-shrink: 0; }
-.cv-card-dash { color: var(--text3); flex-shrink: 0; font-size: 11px; }
-.cv-card-sum { color: var(--text2); font-weight: 300; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cv-card-timer { font-size: 10px; color: var(--text3); font-variant-numeric: tabular-nums; }
-.cv-card-chev { flex-shrink: 0; opacity: .4; transition: transform .15s; }
-.cv-card-chev.open { transform: rotate(180deg); opacity: .7; }
-
-@keyframes cvSpin { to { transform: rotate(360deg); } }
-.cv-card-spin { animation: cvSpin 1.2s linear infinite; flex-shrink: 0; }
-
-.cv-card-body { padding: 2px 2px 8px; position: relative; }
-
-/* ─── Step banners (plan / error) ─── */
-.cv-step-banner { padding: 5px 10px; font-size: 12px; font-weight: 400; color: var(--accent); background: rgba(79,125,255,.04); border-radius: 4px; margin-bottom: 4px; }
-.cv-step-err { color: var(--red); background: rgba(248,81,73,.04); }
-
-/* ─── Live thinking block (streaming) ─── */
-.cv-think-live { margin: 4px 0; border: 1px solid rgba(79,125,255,.25); border-radius: var(--radius); background: rgba(79,125,255,.03); overflow: hidden; animation: cvPulseBorder 2s ease-in-out infinite; }
-@keyframes cvPulseBorder { 0%,100%{border-color:rgba(79,125,255,.12)} 50%{border-color:rgba(79,125,255,.35)} }
-.cv-think-live-hdr { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border); }
-.cv-think-dot { flex-shrink: 0; animation: cvPulse 1.2s ease-in-out infinite; }
-@keyframes cvPulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-.cv-think-live-label { font-size: 11px; font-weight: 500; color: var(--accent); }
-.cv-think-live-body { padding: 8px 10px; font-size: 13px; line-height: 1.6; color: var(--text); max-height: 400px; overflow-y: auto; }
-.cv-think-body { padding: 8px 10px; font-size: 13px; line-height: 1.6; color: var(--text); max-height: 200px; overflow-y: auto; }
-.cv-think-live-body :deep(p) { margin: 4px 0; }
-.cv-think-live-body :deep(pre) { margin: 6px 0; padding: 8px 10px; background: var(--bg3); border-radius: 4px; font-size: 11px; overflow-x: auto; }
-.cv-think-live-body :deep(code) { font-family: var(--font-mono); font-size: 11px; }
-.cv-think-live-body :deep(.mermaid-wrap) { margin: 6px 0; }
-.cv-think-live-body :deep(svg) { max-width: 100%; height: auto; }
-.cv-report-live { border-color: rgba(63,185,80,.3) !important; background: rgba(63,185,80,.03) !important; animation: cvPulseBorderGreen 2s ease-in-out infinite; }
-@keyframes cvPulseBorderGreen { 0%,100%{border-color:rgba(63,185,80,.1)} 50%{border-color:rgba(63,185,80,.3)} }
-
-/* ─── Collapsed thinking block (like chat mode) ─── */
-.cv-think-block { margin-bottom: 2px; }
-.cv-think-block.cv-think-live { border: 1px solid rgba(79,125,255,.25); border-radius: var(--radius); background: rgba(79,125,255,.03); }
-.cv-think-block-hdr { display: flex; align-items: center; gap: 5px; padding: 4px 8px; cursor: pointer; user-select: none; border-radius: 4px; }
-.cv-think-block-hdr:hover { background: var(--bg3); }
-.cv-think-chev { flex-shrink: 0; color: var(--text3); transition: transform .15s; }
-.cv-think-chev.open { transform: rotate(90deg); }
-.cv-think-block-label { font-size: 11px; font-weight: 500; color: var(--text3); }
-.cv-think-block-body { padding: 4px 10px 8px 23px; font-size: 12px; line-height: 1.55; color: var(--text2); white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; }
-.cv-think-block-body.markdown-body { white-space: normal; }
-.cv-think-block-body :deep(pre) { margin: 4px 0; padding: 6px 8px; background: var(--bg3); border-radius: 4px; font-size: 10px; overflow-x: auto; }
-.cv-think-block-body :deep(code) { font-family: var(--font-mono); font-size: 10px; }
-.cv-think-block-body :deep(p) { margin: 2px 0; }
-
-/* ─── Report — markdown ─── */
-.cv-report { padding: 6px 10px 6px 12px; font-size: 13px; line-height: 1.6; color: var(--text); }
-.cv-report :deep(pre) { margin: 8px 0; padding: 10px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-x: auto; font-size: 11px; }
-.cv-report :deep(code) { font-family: var(--font-mono); font-size: 11px; }
-.cv-report :deep(p) { margin: 4px 0; }
-.cv-report :deep(ul), .cv-report :deep(ol) { padding-left: 20px; margin: 4px 0; }
-/* Mermaid diagrams */
-.mermaid-wrap { margin: 8px 0; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
-.mermaid-wrap :deep(svg) { max-width: 100%; height: auto; }
-.svg-chart-wrap { background: #fff; }
-.svg-chart-wrap :deep(svg) { max-width: 100%; height: auto; display: block; }
-
-/* ─── Step rows (new: inline hint, richer) ─── */
-.cv-step { margin-bottom: 1px; border-radius: 5px; transition: background .15s; }
-.cv-step:hover { background: var(--bg3); }
-.cv-step-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; font-size: 12px; font-weight: 300; }
-.cv-step-spin { animation: cvSpin 1.2s linear infinite; flex-shrink: 0; }
-.cv-step-ok { flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-.cv-step-phrase { color: var(--text); font-size: 12px; font-weight: 400; flex-shrink: 0; white-space: nowrap; }
-.cv-step-phrase.sweep { background: linear-gradient(90deg, var(--text) 30%, var(--accent) 50%, var(--text) 70%); background-size: 200% 100%; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: cvSweep 2.2s ease-in-out infinite; }
-@keyframes cvSweep { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }
-.cv-step-tool { color: var(--text3); font-size: 10px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; opacity: .6; }
-.cv-step-hint-inline { color: var(--text3); font-size: 10px; font-weight: 300; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; max-width: 120px; }
-.cv-step-file { color: var(--accent); font-size: 11px; font-family: var(--font-mono); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; flex-shrink: 1; }
-.cv-step-chev { flex-shrink: 0; opacity: .35; transition: transform .15s; }
-.cv-step-chev.open { transform: rotate(180deg); opacity: .65; }
-.cv-step-detail { margin: 2px 10px 4px 27px; padding: 6px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; }
-.cv-step-code { font-size: 10px; font-family: var(--font-mono); color: var(--text2); white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
-
-/* ─── Handoff banner ─── */
-.cv-handoff { margin: 8px 4px; padding: 10px 12px; border: 1px solid rgba(79,125,255,.25); border-radius: var(--radius); background: rgba(79,125,255,.04); display: flex; align-items: center; gap: 10px; }
-.cv-handoff-icon { flex-shrink: 0; color: var(--accent); }
-.cv-handoff-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.cv-handoff-title { font-size: 12px; font-weight: 500; color: var(--accent); }
-.cv-handoff-desc { font-size: 11px; color: var(--text3); font-weight: 300; }
-.cv-handoff-btn { display: flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--accent); background: var(--accent); color: #fff; font-size: 12px; font-family: inherit; font-weight: 400; cursor: pointer; transition: all .12s; white-space: nowrap; }
-.cv-handoff-btn:hover { background: var(--accent-hover); }
-.cv-handoff-btn:disabled { opacity: .4; cursor: not-allowed; }
-
-/* ─── Scan line ─── */
-.cv-scan { height: 1px; margin-top: 4px; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: cvScan 2s ease-in-out infinite; opacity: .4; }
-@keyframes cvScan { 0% { opacity: 0; transform: scaleX(0); transform-origin: left; } 50% { opacity: 1; transform: scaleX(1); transform-origin: left; } 100% { opacity: 0; transform: scaleX(0); transform-origin: right; } }
-
-/* ─── Task plan at bottom ─── */
-.cv-todos { margin: 8px 4px 4px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg); }
-.cv-todos-hdr { display: flex; align-items: center; gap: 6px; padding: 7px 10px; font-size: 12px; font-weight: 500; color: var(--green); border-bottom: 1px solid var(--border); }
-.cv-todo-item { display: flex; align-items: center; gap: 7px; padding: 5px 10px; font-size: 12px; color: var(--text2); font-weight: 300; transition: all .2s; }
-.cv-todo-item.done { color: var(--text3); }
-.cv-todo-item.done .cv-todo-text { text-decoration: line-through; opacity: .5; }
-.cv-todo-item.active { color: var(--accent); font-weight: 500; background: rgba(79,125,255,.04); }
-.cv-todo-spin { animation: cvSpin 1.2s linear infinite; }
-.cv-todo-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* ─── Final output ─── */
-.cv-final { padding: 8px 10px; font-size: 13px; line-height: 1.6; color: var(--text); border-top: 1px solid var(--border); max-height: 300px; overflow-y: auto; }
-.cv-final-err { border-top-color: rgba(248,81,73,.2); }
-
+/* Final report — left-aligned with compact body */
+.cv-report {
+  padding: 6px 0 4px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text);
+  word-break: break-word;
+}
+.cv-report-text :deep(pre) { margin: 6px 0; padding: 8px 10px; background: var(--bg3); border-radius: 4px; font-size: 11px; overflow-x: auto; }
+.cv-report-text :deep(code) { font-family: var(--font-mono); font-size: 11px; }
+.cv-report-text :deep(p) { margin: 4px 0; }
 
 /* ─── Image chips (code mode) ─── */
 .cv-img-chips { padding: 0 10px 6px; display: flex; flex-wrap: wrap; gap: 5px; }
@@ -1482,23 +1071,6 @@ async function send() {
 .cv-confirm-sub { font-size: 12px; color: var(--text3); font-weight: 300; margin: 0 0 12px; }
 .cv-confirm-path { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text3); font-family: var(--font-mono); background: var(--bg3); padding: 6px 10px; border-radius: 4px; word-break: break-all; }
 .cv-folder-input { display: none; }
-
-/* ─── highlight.js theme overrides ─── */
-.cv-line-code :deep(.hljs-keyword) { color: #c678dd; }
-.cv-line-code :deep(.hljs-string) { color: #98c379; }
-.cv-line-code :deep(.hljs-number) { color: #d19a66; }
-.cv-line-code :deep(.hljs-comment) { color: #5c6370; font-style: italic; }
-.cv-line-code :deep(.hljs-function) { color: #61afef; }
-.cv-line-code :deep(.hljs-title) { color: #61afef; }
-.cv-line-code :deep(.hljs-built_in) { color: #e5c07b; }
-.cv-line-code :deep(.hljs-literal) { color: #d19a66; }
-.cv-line-code :deep(.hljs-type) { color: #e5c07b; }
-.cv-line-code :deep(.hljs-attr) { color: #d19a66; }
-.cv-line-code :deep(.hljs-params) { color: #abb2bf; }
-.cv-line-code :deep(.hljs-meta) { color: #61afef; }
-.cv-line-code :deep(.hljs-tag) { color: #e06c75; }
-.cv-line-code :deep(.hljs-name) { color: #e06c75; }
-.cv-line-code :deep(.hljs-attr) { color: #d19a66; }
 .cv-line-code :deep(.hljs-selector-class) { color: #61afef; }
 .cv-line-code :deep(.hljs-selector-id) { color: #61afef; }
 </style>

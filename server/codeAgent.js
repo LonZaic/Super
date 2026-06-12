@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════
+﻿// ═══════════════════════════════════════════
 // Code Agent Engine — Long-running task support
 // Integrates: hooks, permissions, MCP, skills, sub-agents, session recovery, todo tracking
 // Inspired by Claude Code
@@ -266,12 +266,30 @@ ${task}
   catch { return [{ id: '1', text: task }] }
 }
 
+// ─── Chat detection — trivial greetings / small talk → direct reply, no tools ───
+function isChatMessage(task) {
+  const t = (task || '').trim()
+  // Very short messages are chat
+  if (t.length <= 2) return true
+  if (t.length <= 4 && !/[a-zA-Z]/.test(t)) return true
+  // Greeting / small talk patterns
+  const chatPatterns = [
+    /^(hi|hey|hello|yo|sup|hai|halo)\b/i,
+    /^(你好|嗨|哈喽|嘿|喂|在吗|在不在|在不|早|早安|晚安|下午好|晚上好|吃了?吗)/,
+    /^(谢谢|thanks?|thank you|ok|好的|行|可以|知道了|懂了|明白了|嗯|哦|对|是的|没错)/,
+    /^(再见|bye|拜拜|88|回头见|下次聊)/,
+    /^(怎么样|你觉得|你怎么看|行不行|有没有|能不能|可不可以)\??$/,
+    /^(哈哈|呵呵|嘿嘿|嘻嘻|笑死|牛逼|厉害|6|666|牛)/,
+    /^(what|who|where|when|why|how are you)\b/i,
+    /^(你是|你是谁|你叫什么|你多大了|你男的女的)/,
+    /^[一-龥]{1,3}$/,  // 1-3 Chinese chars, no context
+  ]
+  return chatPatterns.some(r => r.test(t))
+}
+
 // ─── Quick question detection ───
-// Default: quick/analysis mode. Only full planning for explicit code creation requests.
 function isAnalysisTask(task) {
   const t = (task || '').toLowerCase()
-  // Code CREATION patterns — these need full planning
-  // Must catch common Chinese shorthand: 写个, 画个, 做个, 改个, 删个 etc.
   const createPatterns = [
     /(创建|新建|生成|写一?个?|编写|开发|构建|做一?个?|搭一?个?|画一?个?|实现|create|make|build|develop|implement|scaffold|write)/,
     /(添加|增加|加一?个?|add)/,
@@ -281,7 +299,7 @@ function isAnalysisTask(task) {
     /(修复|fix|debug|修一下)/,
   ]
   const needsFullPlan = createPatterns.some(r => r.test(t))
-  return !needsFullPlan  // default to analysis mode unless explicitly creating
+  return !needsFullPlan
 }
 async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4-pro', onProgress, signal, existingTasks = null }) {
   projectPath = path.isAbsolute(projectPath) ? projectPath : path.resolve(WORKSPACE, projectPath)
@@ -295,11 +313,37 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
 
   onProgress({ type: 'start', task, projectPath, isHandoff })
   let _handoffGenerated = false
-  // Accumulated real usage from API (for frontend display)
   const _accUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
-  // Real context fullness — prompt_tokens from the LAST API call (NOT cumulative)
-  // This is the ground-truth token count of the full messages array
   let lastPromptTokens = 0
+
+  // ─── Chat mode: trivial greetings / small talk → direct reply, no tools, no plan ───
+  if (!existingTasks && isChatMessage(task)) {
+    onProgress({ type: 'thinking', text: '...' })
+    try {
+      const chatRes = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: '你是 DeepSeek 助手，工作在项目 ' + projectPath + '。直接简洁回复，不用工具。最多三句话。' },
+            { role: 'user', content: task }
+          ],
+          max_tokens: 256, temperature: 0.7, stream: false
+        }),
+        signal
+      })
+      const chatData = await chatRes.json()
+      const reply = chatData.choices?.[0]?.message?.content || '在的，请说。'
+      onProgress({ type: 'step_thinking_done' })
+      onProgress({ type: 'done', text: reply })
+      return reply
+    } catch (e) {
+      if (e.name === 'AbortError') return ''
+      onProgress({ type: 'done', text: '在的，请说。' })
+      return '在的，请说。'
+    }
+  }
 
   // ─── Phase 1: Plan (skip for analysis/quick tasks) ───
   const analysisMode = !existingTasks && isAnalysisTask(task)
@@ -479,7 +523,7 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
       // ═══ Parse SSE stream (stream thinking in real-time) ═══
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
-      let sseBuf = '', fullContent = '', finishReason = ''
+      let sseBuf = '', fullContent = '', reasoningContent = '', finishReason = ''
       const toolAcc = {}
       let lastStreamEmit = 0
       let chunkUsage = null  // capture real usage from API
@@ -509,6 +553,15 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
             }
             const delta = chunk.choices?.[0]?.delta
             if (!delta) continue
+            // DeepSeek v4 reasoning_content = AI's chain-of-thought
+            if (delta.reasoning_content) {
+              reasoningContent += delta.reasoning_content
+              const nowR = Date.now()
+              if (nowR - lastStreamEmit > 120) {
+                onProgress({ type: 'step_thinking', text: reasoningContent })
+                lastStreamEmit = nowR
+              }
+            }
             if (delta.content) {
               fullContent += delta.content
               // Stream thinking in real-time (throttled to ~80ms for smoother output)
@@ -519,8 +572,11 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
               }
             }
             if (delta.tool_calls) {
-              // Flush remaining stream, then emit thinking_done so UI auto-collapses
-              if (fullContent) {
+              // Flush reasoning as thinking before tool execution
+              if (reasoningContent) {
+                onProgress({ type: 'step_thinking', text: reasoningContent })
+                onProgress({ type: 'step_thinking_done' })
+              } else if (fullContent) {
                 onProgress({ type: 'streaming', text: fullContent })
                 onProgress({ type: 'step_thinking_done' })
               }
@@ -537,6 +593,7 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
         }
       }
       // Final stream emit
+      if (reasoningContent) onProgress({ type: 'step_thinking', text: reasoningContent })
       if (fullContent) onProgress({ type: 'streaming', text: fullContent })
 
       // ═══ Max-output-token recovery ═══
@@ -649,10 +706,15 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
       finalResult = fullContent || '步骤进行中'
     } // end inner multi-round loop
 
-    // Mark task done after inner loop completes (AI confirmed no more tool calls)
-    taskItem.done = true
-    writeTasks(projectPath, allTasks)
-    onProgress({ type: 'task_done', taskId: taskItem.id, text: taskItem.text })
+    // Only mark task done if AI confirmed completion (not error/abort)
+    if (taskComplete) {
+      taskItem.done = true
+      writeTasks(projectPath, allTasks)
+      onProgress({ type: 'task_done', taskId: taskItem.id, text: taskItem.text })
+    } else {
+      onProgress({ type: 'error', text: 'Step ' + taskItem.id + ' interrupted: ' + (finalResult || 'unknown') })
+      break
+    }
 
     // Update Follow.md after each task (incremental)
     try { await summarizeRound(projectPath, task, finalResult, messages, apiKey, signal) } catch {}

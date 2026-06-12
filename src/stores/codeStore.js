@@ -16,6 +16,7 @@ import {
   deleteCodeConversation,
 } from '../db/database.js'
 import { readFileContent } from '../api/code.api.js'
+import { reconstructCompactState } from '../utils/codeCompact.js'
 
 export const useCodeStore = defineStore('code', () => {
   const projectPath = ref('')
@@ -137,7 +138,7 @@ export const useCodeStore = defineStore('code', () => {
       messagesMap.value[id] = rows.map(r => {
         let events = []
         try { events = JSON.parse(r.events_json || '[]') } catch {}
-        return {
+        const msg = {
           id: r.id,
           _id: r.role + '_' + r.id,
           role: r.role,
@@ -151,6 +152,11 @@ export const useCodeStore = defineStore('code', () => {
           _timer: r.timer || '',
           _expanded: true,
         }
+        // Reconstruct compact state for AI messages
+        if (r.role === 'ai') {
+          msg._compactState = reconstructCompactState(msg)
+        }
+        return msg
       })
       // Load task state from last message
       const last = rows[rows.length - 1]
