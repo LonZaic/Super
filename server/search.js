@@ -927,6 +927,10 @@ async function baiduBaikeSearch(query, maxResults = 3) {
 // MAIN PIPELINE: webSearchVerified — the full accuracy pipeline
 // ═══════════════════════════════════════════════════════════
 async function webSearchVerified(query, maxResults = 5) {
+  // ─── Cache check ───
+  const cached = _getCache(query)
+  if (cached) { console.log(`[search:verified] CACHE HIT: "${query}"`); return cached }
+
   const queryType = detectQueryType(query)
   const timeCtx = getTimeContext(queryType, query)
   const enhancedQuery = query + timeCtx.suffix
@@ -1088,6 +1092,8 @@ async function webSearchVerified(query, maxResults = 5) {
     text += '\n⚠️ 搜索结果置信度较低。回答时请标注不确定性，建议用户交叉验证。'
   }
 
+  // ─── Cache result ───
+  _setCache(query, text)
   return text
 }
 
@@ -1096,4 +1102,41 @@ async function webSearchDual(query, maxResults = 5) {
   return webSearchVerified(query, maxResults)
 }
 
-module.exports = { webSearch, webSearchDual, webSearchVerified, formatSearchResults, bingNewsSearch, sogouSearch, searchOfficialSources, doubanSearch, baiduBaikeSearch }
+module.exports = { webSearch, webSearchDual, webSearchVerified, formatSearchResults, bingNewsSearch, sogouSearch, searchOfficialSources, doubanSearch, baiduBaikeSearch, isPoorResults, generateAltQueries, generateRelaxedQueries, detectQueryType, _getCache, _setCache, _getCrawlCache, _setCrawlCache }
+
+// ─── In-memory LRU cache ───
+const CACHE_TTL_MS = 15 * 60 * 1000
+const MAX_CACHE_ENTRIES = 200
+const _searchCache = new Map()
+const _crawlCache = new Map()
+
+function _normalizeQ(q) { return (q || '').trim().toLowerCase().replace(/\s+/g, ' ') }
+
+function _getCache(query) {
+  const key = _normalizeQ(query)
+  const entry = _searchCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.t > CACHE_TTL_MS) { _searchCache.delete(key); return null }
+  _searchCache.delete(key); _searchCache.set(key, entry)
+  return entry.r
+}
+function _setCache(query, results) {
+  const key = _normalizeQ(query)
+  _searchCache.delete(key)
+  _searchCache.set(key, { r: results, t: Date.now() })
+  if (_searchCache.size > MAX_CACHE_ENTRIES) _searchCache.delete(_searchCache.keys().next().value)
+}
+function _getCrawlCache(url) {
+  const key = (url || '').trim()
+  const entry = _crawlCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.t > CACHE_TTL_MS) { _crawlCache.delete(key); return null }
+  _crawlCache.delete(key); _crawlCache.set(key, entry)
+  return entry.r
+}
+function _setCrawlCache(url, content) {
+  const key = (url || '').trim()
+  _crawlCache.delete(key)
+  _crawlCache.set(key, { r: content, t: Date.now() })
+  if (_crawlCache.size > MAX_CACHE_ENTRIES) _crawlCache.delete(_crawlCache.keys().next().value)
+}

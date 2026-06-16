@@ -6,18 +6,22 @@
 
 let _observer = null
 let _mermaidReady = false
+let _mermaidTheme = 'dark'
 
 // ─── Ensure mermaid global is initialized ───
 function ensureMermaid() {
   if (typeof window === 'undefined') return false
   if (!window.mermaid) return false
-  if (!_mermaidReady) {
+  // Re-init when theme changes
+  const theme = (typeof localStorage !== 'undefined' && localStorage.getItem('ds_theme') === 'light') ? 'default' : 'dark'
+  if (!_mermaidReady || _mermaidTheme !== theme) {
     try {
       window.mermaid.initialize({
         startOnLoad: false,
-        theme: 'dark',
+        theme,
         securityLevel: 'loose',
       })
+      _mermaidTheme = theme
       _mermaidReady = true
     } catch (e) {
       console.warn('[mediaRenderer] mermaid init failed:', e.message)

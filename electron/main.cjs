@@ -3,7 +3,7 @@
 // Starts Express server in-process, opens app window
 // ══════════════════════════════════════
 
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain } = require('electron')
 const path = require('path')
 const http = require('http')
 
@@ -59,6 +59,16 @@ function createWindow() {
 
   win.loadURL(`http://127.0.0.1:${PORT}`)
 }
+
+// ─── IPC: Native folder picker ───
+ipcMain.handle('dialog:selectDirectory', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: '选择项目文件夹',
+  })
+  if (result.canceled || !result.filePaths.length) return null
+  return result.filePaths[0]
+})
 
 // ─── App lifecycle ───
 app.whenReady().then(async () => {

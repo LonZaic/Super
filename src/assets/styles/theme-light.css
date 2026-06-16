@@ -1,18 +1,369 @@
 /* ══════════════════════════════════════
-   Light Theme — component-level adjustments
+   Light Theme — Warm White + Navy Blue
+   暖白底色 + 藏青文字 + 不同透明度黑色
    ══════════════════════════════════════ */
 
 [data-theme="light"] {
   color-scheme: light;
+
+  /* ─── Warm white backgrounds ─── */
+  --bg: #faf8f5;
+  --bg2: #f3f0eb;
+  --bg3: #ebe7e1;
+  --bg4: #e0dcd5;
+
+  /* ─── Navy blue text (藏青色) ─── */
+  --text: #1a2744;
+  --text2: rgba(26, 39, 68, 0.62);
+  --text3: rgba(26, 39, 68, 0.40);
+
+  /* ─── Borders — black at different opacities ─── */
+  --border: rgba(0, 0, 0, 0.07);
+  --border2: rgba(0, 0, 0, 0.13);
+
+  /* ─── Accent — slightly deeper blue for light bg readability ─── */
+  --accent: #3d5eef;
+  --accent-hover: #5b78ff;
+  --accent-active: #2f4cd4;
+  --accent-muted: rgba(61, 94, 239, 0.08);
+  --accent-glow: rgba(61, 94, 239, 0.14);
+
+  /* ─── Status colors — slight tweaks for light bg ─── */
+  --green: #2da44e;
+  --red: #d1242f;
+  --yellow: #9a6700;
+  --red-muted: rgba(209, 36, 47, 0.08);
+
+  /* ─── Shadows — much lighter in light mode ─── */
+  --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.09);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.11);
+
+  /* ─── Bridge legacy var names ─── */
+  --bg-primary: var(--bg);
+  --bg-secondary: var(--bg2);
+  --bg-tertiary: var(--bg3);
+  --bg-hover: var(--bg3);
+  --bg-active: var(--bg3);
+  --bg-elevated: var(--bg2);
+  --text-primary: var(--text);
+  --text-secondary: var(--text2);
+  --text-muted: var(--text3);
+  --border-light: var(--border);
+  --surface: var(--bg2);
+  --surface-border: var(--border);
+  --surface-hover: var(--bg3);
+  --primary: var(--accent);
+  --primary-hover: var(--accent-hover);
+  --primary-bg: var(--accent-muted);
 }
 
 /* ─── Code blocks (light mode) ─── */
 [data-theme="light"] pre,
 [data-theme="light"] code {
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(0, 0, 0, 0.035);
 }
 
 /* ─── Input placeholder ─── */
 [data-theme="light"] ::placeholder {
   color: var(--text-muted);
+}
+
+/* ─── Selection ─── */
+[data-theme="light"] ::selection {
+  background: rgba(61, 94, 239, 0.15);
+  color: var(--text);
+}
+
+/* ─── Scrollbar ─── */
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* ─── Highlight.js light theme overrides ─── */
+[data-theme="light"] .hljs {
+  background: rgba(0, 0, 0, 0.025);
+  color: var(--text2);
+}
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-literal,
+[data-theme="light"] .hljs-doctag { color: #a626a4; }
+[data-theme="light"] .hljs-string,
+[data-theme="light"] .hljs-regexp,
+[data-theme="light"] .hljs-addition,
+[data-theme="light"] .hljs-attribute { color: #0a789c; }
+[data-theme="light"] .hljs-comment,
+[data-theme="light"] .hljs-quote,
+[data-theme="light"] .hljs-meta { color: #8b9199; font-style: italic; }
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-built_in,
+[data-theme="light"] .hljs-type,
+[data-theme="light"] .hljs-params { color: #b45a0a; }
+[data-theme="light"] .hljs-function .hljs-title,
+[data-theme="light"] .hljs-title.function_,
+[data-theme="light"] .hljs-section,
+[data-theme="light"] .hljs-title.class_ { color: #6a4bf0; }
+[data-theme="light"] .hljs-tag { color: #116932; }
+[data-theme="light"] .hljs-attr { color: #b45a0a; }
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-template-variable { color: #b45a0a; }
+[data-theme="light"] .hljs-deletion { color: #d1242f; }
+[data-theme="light"] .hljs-selector-class,
+[data-theme="light"] .hljs-selector-id,
+[data-theme="light"] .hljs-selector-attr,
+[data-theme="light"] .hljs-selector-pseudo { color: #116932; }
+[data-theme="light"] .hljs-symbol,
+[data-theme="light"] .hljs-bullet,
+[data-theme="light"] .hljs-link { color: #6a4bf0; }
+
+/* ─── Markdown light-mode adjustments ─── */
+[data-theme="light"] .markdown-body pre {
+  background: rgba(0, 0, 0, 0.025);
+}
+[data-theme="light"] .markdown-body code {
+  background: rgba(0, 0, 0, 0.045);
+  color: var(--text2);
+}
+[data-theme="light"] .markdown-body pre code {
+  background: none;
+}
+[data-theme="light"] .markdown-body blockquote {
+  color: var(--text2);
+  border-left-color: var(--accent);
+}
+[data-theme="light"] .markdown-body th {
+  background: var(--bg3);
+}
+[data-theme="light"] .markdown-body td {
+  border-color: var(--border);
+}
+/* AI paragraph separators — subtle for light mode */
+[data-theme="light"] .markdown-body p + p {
+  border-top-color: rgba(61, 94, 239, 0.10);
+}
+
+/* ─── SVG chart wrap — already has white bg ─── */
+[data-theme="light"] .svg-render-wrap {
+  background: var(--bg);
+}
+[data-theme="light"] .svg-chart-wrap {
+  background: #fff;
+}
+
+/* ─── Mermaid light theme overrides ─── */
+[data-theme="light"] .mermaid-wrap {
+  background: var(--bg);
+}
+[data-theme="light"] .mermaid-toolbar {
+  background: var(--bg2);
+}
+[data-theme="light"] .mermaid-overlay {
+  background: rgba(0, 0, 0, 0.55);
+}
+[data-theme="light"] .mermaid-overlay-inner {
+  background: var(--bg);
+}
+[data-theme="light"] .mermaid-overlay-close {
+  background: rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .mermaid-overlay-close::before,
+[data-theme="light"] .mermaid-overlay-close::after {
+  background: var(--text);
+}
+[data-theme="light"] .mermaid-overlay-close:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* ─── HomeView feature cards — light bg adjustment ─── */
+[data-theme="light"] .hp-card {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+
+/* ─── Modal overlays — lighter tint ─── */
+[data-theme="light"] .tp-overlay,
+[data-theme="light"] .confirm-overlay,
+[data-theme="light"] .rename-overlay,
+[data-theme="light"] .sp-backdrop,
+[data-theme="light"] .cv-modal-overlay {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* ─── HomeView tab hover — use dark-tinted hover ─── */
+[data-theme="light"] .tab:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* ─── InputBar file chips — dark borders in light mode ─── */
+[data-theme="light"] .file-chip {
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+[data-theme="light"] .file-chip:hover {
+  border-color: rgba(0, 0, 0, 0.22) !important;
+}
+
+/* ─── Key group accent bg — adjust for light mode ─── */
+[data-theme="light"] .sp-key-group-accent {
+  border-color: rgba(61, 94, 239, 0.25);
+  background: rgba(61, 94, 239, 0.05);
+}
+
+/* ─── Settings key input bg ─── */
+[data-theme="light"] .sp-key-group-accent .sp-key-input {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(61, 94, 239, 0.2);
+}
+
+/* ─── Agent Progress thinking block border ─── */
+[data-theme="light"] .ap-think {
+  background: rgba(61, 94, 239, 0.03);
+}
+[data-theme="light"] .ap-root.running {
+  border-color: rgba(61, 94, 239, 0.14);
+}
+
+/* ─── CodeView line diff backgrounds ─── */
+[data-theme="light"] .cv-line-del { background: rgba(209, 36, 47, 0.06); }
+[data-theme="light"] .cv-line-add { background: rgba(45, 164, 78, 0.06); }
+
+/* ─── CodeView model menu ─── */
+[data-theme="light"] .cv-model-menu {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+/* ─── CodeView modal ─── */
+[data-theme="light"] .cv-modal {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* ─── Agent Progress interrupted state ─── */
+[data-theme="light"] .ap-root.interrupted {
+  border-color: rgba(209, 36, 47, 0.2);
+}
+[data-theme="light"] .ap-final-interrupted {
+  border-top-color: rgba(209, 36, 47, 0.15);
+}
+
+/* ─── Agent Progress error block ─── */
+[data-theme="light"] .ap-err-block {
+  background: rgba(209, 36, 47, 0.05);
+  border-color: rgba(209, 36, 47, 0.15);
+}
+
+/* ─── Sidebar code history popup shadow ─── */
+[data-theme="light"] .code-hist-popup {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .code-hist-item.active {
+  background: rgba(61, 94, 239, 0.08);
+}
+
+/* ─── Confirm box shadow ─── */
+[data-theme="light"] .confirm-box {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* ─── Lang menu shadow ─── */
+[data-theme="light"] .lang-menu {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+
+/* ─── Rename box shadow ─── */
+[data-theme="light"] .rename-box {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+/* ─── Panel box shadow ─── */
+[data-theme="light"] .sp-panel {
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.08);
+}
+
+/* ─── Settings radio card ─── */
+[data-theme="light"] .sp-radio:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* ─── Settings save button — keep white text ─── */
+[data-theme="light"] .sp-save-btn {
+  color: #fff;
+}
+
+/* ─── Sidebar search clear hover ─── */
+[data-theme="light"] .search-clear:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* ─── File preview panel chip ─── */
+[data-theme="light"] .fp-cat-image {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text2);
+}
+
+/* ─── Settings status badges — no bg in light mode ─── */
+[data-theme="light"] .sp-key-status.no {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* ─── Topbar user label ─── */
+[data-theme="light"] .topbar-user {
+  color: var(--text2);
+}
+
+/* ─── ChatView message bubble — ensure contrast ─── */
+[data-theme="light"] .msg.ai .msg-body {
+  background: var(--bg2);
+}
+
+/* ─── HomeView blank slate descriptions ─── */
+[data-theme="light"] .home-desc {
+  color: var(--text2);
+}
+
+/* ─── Yammy mascot — keep opacity ─── */
+[data-theme="light"] .yammy-wrap {
+  opacity: 0.9;
+}
+
+/* ─── CodeView highlight.js colors override for light mode ─── */
+[data-theme="light"] .cv-line-code :deep(.hljs-keyword) { color: #a626a4; }
+[data-theme="light"] .cv-line-code :deep(.hljs-string) { color: #0a789c; }
+[data-theme="light"] .cv-line-code :deep(.hljs-number) { color: #b45a0a; }
+[data-theme="light"] .cv-line-code :deep(.hljs-comment) { color: #8b9199; font-style: italic; }
+[data-theme="light"] .cv-line-code :deep(.hljs-function) { color: #6a4bf0; }
+[data-theme="light"] .cv-line-code :deep(.hljs-title) { color: #6a4bf0; }
+[data-theme="light"] .cv-line-code :deep(.hljs-built_in) { color: #b45a0a; }
+[data-theme="light"] .cv-line-code :deep(.hljs-literal) { color: #b45a0a; }
+[data-theme="light"] .cv-line-code :deep(.hljs-type) { color: #b45a0a; }
+[data-theme="light"] .cv-line-code :deep(.hljs-attr) { color: #b45a0a; }
+[data-theme="light"] .cv-line-code :deep(.hljs-params) { color: var(--text2); }
+[data-theme="light"] .cv-line-code :deep(.hljs-meta) { color: #6a4bf0; }
+[data-theme="light"] .cv-line-code :deep(.hljs-tag) { color: #116932; }
+[data-theme="light"] .cv-line-code :deep(.hljs-name) { color: #116932; }
+[data-theme="light"] .cv-line-code :deep(.hljs-selector-class) { color: #6a4bf0; }
+[data-theme="light"] .cv-line-code :deep(.hljs-selector-id) { color: #6a4bf0; }
+
+/* ─── Mermaid status text ─── */
+[data-theme="light"] .mermaid-status {
+  color: var(--text3);
+}
+
+/* ─── Mermaid fullscreen close button ─── */
+[data-theme="light"] .mermaid-overlay-close {
+  background: rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .mermaid-overlay-close:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+[data-theme="light"] .mermaid-overlay-close::before,
+[data-theme="light"] .mermaid-overlay-close::after {
+  background: var(--text);
+}
+
+/* ─── Global error bar — keep red bg, white text ─── */
+[data-theme="light"] #app > div[style*="background:#dc2626"] {
+  color: #fff;
 }

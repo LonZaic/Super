@@ -7,7 +7,7 @@
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
-const { webSearch, webSearchDual, formatSearchResults } = require('./search')
+const { webSearch, webSearchDual, webSearchVerified, formatSearchResults, isPoorResults, generateAltQueries, generateRelaxedQueries, detectQueryType, _getCrawlCache, _setCrawlCache } = require('./search')
 const { initFollow, updateFollowSection, readFollow, hybridSearch } = require('./followManager')
 const { initTask, readTask, writeTasks } = require('./taskManager')
 const { initKeep, generateHandoff, buildNewSessionPrompt } = require('./keepManager')
@@ -15,6 +15,8 @@ const { loadHooks, executePreToolUse, executePostToolUse, executePostAgentStop }
 const { checkToolPermission, classifyCommand, loadPermissionRules, MODES } = require('./permissions')
 const { loadAllMcpTools, executeMcpTool } = require('./mcp/client')
 const { getSkillsPrompt } = require('./skills/skillLoader')
+const { createLoopDetector } = require('./antiloop')
+const { createBudgetTracker } = require('./tokenBudget')
 const { BUILTIN_DEFS, executeBuiltinTool } = require('./tools/builtinTools')
 const { recordEvents, loadSession, buildRecoveryPrompt } = require('./sessionRecovery')
 // subAgent imported lazily inside executeCodeTask to avoid circular dep
@@ -115,16 +117,20 @@ async function executeTool(name, args, projectRoot) {
         return execSync(args.command, { cwd: root, timeout: 30000, encoding: 'utf-8', shell: true }).trim() || '(ok)'
       }
       case 'web_search': {
-        // ─── If query contains URLs, crawl them directly first ───
+        // ─── If query contains URLs, crawl them directly first (with cache) ───
         const queryUrls = args.query.match(/(https?:\/\/[^\s]+)/g)
         if (queryUrls && queryUrls.length > 0) {
           const { crawlUrlDeep, crawlPage } = require('./crawler')
           const crawlResults = []
           for (const u of queryUrls) {
+            // Check crawl cache first
+            const cachedCrawl = _getCrawlCache(u)
+            if (cachedCrawl) { crawlResults.push(cachedCrawl); continue }
             try {
               const isCodeHost = /github\.com|gitee\.com|gitlab\.com/i.test(u)
               const result = isCodeHost ? await crawlUrlDeep(u) : await crawlPage(u)
               if (result && result.content && result.content.length > 20) {
+                _setCrawlCache(u, result.content)
                 crawlResults.push(result.content)
               }
             } catch {}
@@ -133,9 +139,9 @@ async function executeTool(name, args, projectRoot) {
             return '[直接抓取]\n' + crawlResults.join('\n\n---\n\n')
           }
         }
-        // ─── Normal web search with verified pipeline ───
-        const dualResult = await webSearchDual(args.query, 5)
-        if (dualResult && dualResult.length > 20) return dualResult
+        // ─── Verified search pipeline (with cache in webSearchVerified) ───
+        const verifiedResult = await webSearchVerified(args.query, 5)
+        if (verifiedResult && verifiedResult.length > 20) return verifiedResult
         const results = await webSearch(args.query, 5)
         if (!results.length) return `No results found for: ${args.query}`
         return formatSearchResults(results)
@@ -308,6 +314,10 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
   initFollow(projectPath); initTask(projectPath); initKeep(projectPath)
   const followContent = readFollow(projectPath)
 
+  // ─── Anti-loop + token budget detectors ───
+  const loopDetector = createLoopDetector()
+  const budgetTracker = createBudgetTracker(800000)  // 800K token budget
+
   const keepContent = require('./keepManager').readKeep(projectPath)
   const isHandoff = keepContent && !keepContent.includes('等待 AI 在上下文满时生成') && keepContent.length > 100
 
@@ -472,6 +482,33 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
       taskRounds++
       onProgress({ type: 'round', round: totalRounds, taskRound: taskRounds })
 
+      // ─── Anti-loop check ───
+      const loopStatus = loopDetector.checkLoop()
+      if (loopStatus.isLoop) {
+        onProgress({ type: 'thinking', text: '\n[Loop detected: ' + (loopStatus.message || '').slice(0, 80) + ']' })
+        messages.push({ role: 'user', content: loopStatus.message + '\n\n停止重复操作，给出当前已完成工作的总结。' })
+        if (loopStatus.action === 'stop' || loopDetector.isStuck()) {
+          onProgress({ type: 'error', text: 'Loop detected — stopping' })
+          taskComplete = true
+          finalResult = 'Loop detected. Agent stopped.'
+          break
+        }
+      }
+
+      // ─── Token budget check ───
+      const budgetStatus = budgetTracker.getStatus()
+      if (budgetStatus.shouldForceStop) {
+        onProgress({ type: 'thinking', text: '\n[Token budget ' + Math.round(budgetStatus.pct * 100) + '% — force stop]' })
+        messages.push({ role: 'user', content: 'Token budget nearly exhausted. Stop using tools and give a final summary.' })
+        taskComplete = true
+        finalResult = 'Token budget exhausted.'
+        break
+      }
+      if (budgetStatus.shouldNudge) {
+        const nudge = budgetTracker.getNudgeMessage()
+        if (nudge) messages.push({ role: 'user', content: nudge })
+      }
+
       // ═══ Context handoff (no compaction — fresh AI is smarter than compacted AI) ═══
       // Use API-returned prompt_tokens as ground truth. Fall back to estimate for first round.
       const currentTokens = lastPromptTokens > 0 ? lastPromptTokens : estimateTokens(messages)
@@ -525,7 +562,8 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
       const decoder = new TextDecoder()
       let sseBuf = '', fullContent = '', reasoningContent = '', finishReason = ''
       const toolAcc = {}
-      let lastStreamEmit = 0
+      let lastReasonEmit = 0, lastStreamEmit = 0
+      let thinkingFlushed = false  // only flush thinking once per round
       let chunkUsage = null  // capture real usage from API
 
       while (true) {
@@ -550,6 +588,8 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
               _accUsage.promptTokens += chunk.usage.prompt_tokens || 0
               _accUsage.completionTokens += chunk.usage.completion_tokens || 0
               _accUsage.totalTokens += chunk.usage.total_tokens || 0
+              // Feed into budget tracker
+              budgetTracker.recordInput(chunk.usage.prompt_tokens || 0)
             }
             const delta = chunk.choices?.[0]?.delta
             if (!delta) continue
@@ -557,14 +597,13 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
             if (delta.reasoning_content) {
               reasoningContent += delta.reasoning_content
               const nowR = Date.now()
-              if (nowR - lastStreamEmit > 120) {
+              if (nowR - lastReasonEmit > 120) {
                 onProgress({ type: 'step_thinking', text: reasoningContent })
-                lastStreamEmit = nowR
+                lastReasonEmit = nowR
               }
             }
             if (delta.content) {
               fullContent += delta.content
-              // Stream thinking in real-time (throttled to ~80ms for smoother output)
               const now = Date.now()
               if (now - lastStreamEmit > 80) {
                 onProgress({ type: 'streaming', text: fullContent })
@@ -572,13 +611,16 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
               }
             }
             if (delta.tool_calls) {
-              // Flush reasoning as thinking before tool execution
-              if (reasoningContent) {
-                onProgress({ type: 'step_thinking', text: reasoningContent })
-                onProgress({ type: 'step_thinking_done' })
-              } else if (fullContent) {
-                onProgress({ type: 'streaming', text: fullContent })
-                onProgress({ type: 'step_thinking_done' })
+              // Only flush thinking once per round (tool call args arrive in many chunks)
+              if (!thinkingFlushed) {
+                thinkingFlushed = true
+                if (reasoningContent) {
+                  onProgress({ type: 'step_thinking', text: reasoningContent })
+                  onProgress({ type: 'step_thinking_done' })
+                } else if (fullContent) {
+                  onProgress({ type: 'step_thinking', text: fullContent })
+                  onProgress({ type: 'step_thinking_done' })
+                }
               }
               for (const tc of delta.tool_calls) {
                 const idx = tc.index ?? 0
@@ -673,8 +715,44 @@ async function executeCodeTask({ projectPath, task, apiKey, model = 'deepseek-v4
 
         // Execute with hooks + permissions
         const agentCtx = { round: totalRounds, taskRound: taskRounds, task: taskItem?.text || task, workspace: projectPath }
-        const result = await executeToolWithHooks(name, args, projectPath, hooksConfig, permMode, agentCtx)
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: result })
+        let result = await executeToolWithHooks(name, args, projectPath, hooksConfig, permMode, agentCtx)
+
+        // ─── Search verification: auto re-search on poor results ───
+        if (name === 'web_search' && args.query && !result.startsWith('[DENIED]') && !result.startsWith('[BLOCKED]')) {
+          let searchRetries = 0
+          while (isPoorResults(result) && searchRetries < 3) {
+            const alts = [...(generateAltQueries(args.query) || []), ...(generateRelaxedQueries(args.query, detectQueryType(args.query)) || [])]
+            const nextQ = alts.find(a => a !== args.query)
+            if (!nextQ) break
+            onProgress({ type: 'thinking', text: '\n[搜索结果质量不佳，换词重搜: ' + nextQ.slice(0, 40) + '...]' })
+            // Use verified pipeline for re-search
+            const retryResult = await webSearchVerified(nextQ, 5)
+            if (retryResult && !isPoorResults(retryResult)) {
+              result = retryResult
+              break
+            }
+            searchRetries++
+          }
+        }
+
+        // ─── Tool result size cap (CC-style) ───
+        const MAX_TOOL_RESULT = 50 * 1024
+        let cappedResult = String(result || '')
+        if (cappedResult.length > MAX_TOOL_RESULT) {
+          const overflowDir = path.join(projectPath, '.agent-overflow')
+          if (!fs.existsSync(overflowDir)) fs.mkdirSync(overflowDir, { recursive: true })
+          const overflowFile = path.join(overflowDir, 'tool-' + name + '-' + Date.now() + '.txt')
+          fs.writeFileSync(overflowFile, cappedResult, 'utf-8')
+          cappedResult = '[RESULT TOO LARGE: ' + cappedResult.length + ' chars]\nFirst 5KB:\n' + cappedResult.slice(0, 5000) + '\n...\nFull result: ' + overflowFile
+        }
+
+        // ─── Record for loop detection ───
+        loopDetector.recordAction(name, args, cappedResult, fullContent)
+        // ─── Track token usage ───
+        const estTokens = Math.ceil(cappedResult.length / 2.5)
+        budgetTracker.recordOutput(estTokens, taskRounds)
+
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: cappedResult })
 
         // Emit diff events for file ops — use RESOLVED absolute paths
         if (name === 'edit_file' && args.path && !result.startsWith('[DENIED]') && !result.startsWith('[BLOCKED]')) {

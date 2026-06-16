@@ -140,8 +140,7 @@ export function mutateCompactState(cs, e) {
 
     case 'step_thinking_done':
       cs.thinkingDone = true
-      cs.thinkingOpen = false
-      cs.actionText = '思考完毕'
+      // Keep thinking visible — user can click to collapse
       break
 
     // AI step completion report (no tool calls → AI is reporting back)

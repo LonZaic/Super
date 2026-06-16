@@ -201,13 +201,10 @@ watch(() => props.yammyActive, (active) => {
 .cac-think {
   border-left: 2px solid var(--accent-muted);
   padding-left: 6px;
-  transition: max-height 0.2s, opacity 0.15s;
-  max-height: 200px;
-  overflow: hidden;
+  transition: border-color 0.2s;
 }
 .cac-think.collapsed {
-  max-height: 22px;
-  border-left-color: transparent;
+  border-left-color: var(--border);
 }
 .cac-think-hdr {
   display: flex;

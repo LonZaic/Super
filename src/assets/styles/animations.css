@@ -138,6 +138,18 @@
   box-shadow: var(--shadow-glow);
 }
 
+/* ─── Shimmer sweep (GPU-composited, for working indicator bar) ─── */
+@keyframes shimmerSweep {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(220%); }
+}
+
+/* ─── Fade slide compact (tool tags appearing) ─── */
+@keyframes fadeSlideCompact {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ─── Reduced motion ─── */
 @media (prefers-reduced-motion: reduce) {
   *,

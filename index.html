@@ -12,7 +12,11 @@
   <body>
     <div id="app"></div>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-    <script>mermaid.initialize({ startOnLoad: false, theme: 'dark' })</script>
+    <script>
+      // Initialize mermaid with the correct theme based on saved preference
+      const _dsTheme = localStorage.getItem('ds_theme') || 'dark'
+      mermaid.initialize({ startOnLoad: false, theme: _dsTheme === 'light' ? 'default' : 'dark' })
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

@@ -10,7 +10,7 @@
         <span class="cv-empty-title">{{ t('codeEmptyTitle') }}</span>
         <span class="cv-empty-desc">{{ t('codeEmptyDesc') }}</span>
         <div class="cv-empty-actions">
-          <button class="cv-act-btn" @click="showOpenProject = true">
+          <button class="cv-act-btn" @click="openProjectQuick">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h3.8L7 4.5H12V11H2V3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
             {{ t('codeOpenProject') }}
           </button>
@@ -562,6 +562,45 @@ async function loadProject(projectPath) {
     console.error('[Code] loadProject failed:', e)
     store.setFileTree([])
   }
+}
+
+let _folderInput = null
+
+// 打开项目 → 优先弹出系统资源管理器直接选文件夹
+async function openProjectQuick() {
+  try {
+    let folderPath = null
+
+    // Electron: 原生文件夹对话框
+    if (window.superds?.selectDirectory) {
+      folderPath = await window.superds.selectDirectory()
+    }
+    // 浏览器: File System Access API
+    else if (window.showDirectoryPicker) {
+      const handle = await window.showDirectoryPicker({ mode: 'read' })
+      folderPath = handle.name
+      // 尝试从文件夹内文件获取完整路径
+      try {
+        for await (const [, child] of handle.entries()) {
+          if (child.kind === 'file') {
+            const file = await child.getFile()
+            if (file.path) { folderPath = file.path.replace(/[\\/][^\\/]+$/, ''); break }
+          }
+        }
+      } catch {}
+    }
+
+    if (folderPath) {
+      takeoverPath.value = folderPath
+      _isCreatingProject = false
+      showConfirmTakeover.value = true
+      return
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return // 用户取消
+  }
+  // 回退：显示手动输入弹窗
+  showOpenProject.value = true
 }
 
 function confirmOpenProject() {

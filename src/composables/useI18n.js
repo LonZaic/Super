@@ -22,7 +22,12 @@ const L = {
 
   // ── Brand & Nav ──
   brand:           ['DeepSeek-Super', 'DeepSeek-Super', 'DeepSeek-Super', 'DeepSeek-Super'],
-  home:            ['聊天', '聊天', '聊天', 'Chat'],
+  collections:     ['收藏', '收藏', '收藏', 'Collections'],
+  searchCollections: ['搜索收藏...', '搜尋收藏...', '搜尋收藏...', 'Search collections...'],
+  newCollection:   ['新建收藏夹', '新增收藏夾', '新增收藏夾', 'New collection'],
+  allItems:        ['全部', '全部', '全部', 'All'],
+  noAgentConvs:    ['暂无 Agent 对话', '暫無 Agent 對話', '暫無 Agent 對話', 'No agent conversations'],
+  home:            ['主页', '主頁', '首頁', 'Home'],
   code:            ['编程', '編程', '程式', 'Code'],
   newChat:         ['新对话', '新對話', '新對話', 'New Chat'],
   apiKey:          ['API Key', 'API Key', 'API Key', 'API Key'],
@@ -247,6 +252,12 @@ const L = {
   chineseTW:       ['繁體中文（台灣地區）', '繁體中文（台灣地區）', '繁體中文（台灣地區）', 'Traditional Chinese (TW China)'],
   english:         ['English', 'English', 'English', 'English'],
   switchLang:      ['切换语言', '切換語言', '切換語言', 'Language'],
+  appearance:      ['外观', '外觀', '外觀', 'Appearance'],
+  darkMode:        ['深色模式', '深色模式', '深色模式', 'Dark'],
+  lightMode:       ['浅色模式', '淺色模式', '淺色模式', 'Light'],
+  themeAuto:       ['跟随系统', '跟隨系統', '跟隨系統', 'Auto'],
+  themeDarkDesc:   ['深色界面，适合暗光环境', '深色界面，適合暗光環境', '深色界面，適合暗光環境', 'Dark interface, suited for low-light'],
+  themeLightDesc:  ['暖白界面，藏青文字，阅读舒适', '暖白界面，藏青文字，閱讀舒適', '暖白界面，藏青文字，閱讀舒適', 'Warm white with navy text, easy on the eyes'],
 
   // ── Misc ──
   newChatTab:      ['新对话', '新對話', '新對話', 'New Chat'],
@@ -304,6 +315,9 @@ const L = {
   codeAcceptAll:   ['全部同意', '全部同意', '全部同意', 'Accept All'],
   codeRejectAll:   ['全部拒绝', '全部拒絕', '全部拒絕', 'Reject All'],
   codeSwitchProj:  ['切换项目', '切換項目', '切換專案', 'Switch Project'],
+  codeProjectPath: ['项目路径', '項目路徑', '專案路徑', 'Project Path'],
+  codeProjectNameHint: ['输入项目名称...', '輸入項目名稱...', '輸入專案名稱...', 'Enter project name...'],
+  codeParentDirHint: ['如 E:\\', '如 E:\\', '如 E:\\', 'e.g. E:\\'],
   codeConfirmSwitch: ['确认切换', '確認切換', '確認切換', 'Confirm Switch'],
   codeCreate:      ['创建', '創建', '建立', 'Create'],
   codeConfirm:     ['确认', '確認', '確認', 'Confirm'],
@@ -321,6 +335,14 @@ const L = {
   codePlanDone:    ['规划完成', '規劃完成', '規劃完成', 'Planning done'],
   codeStepDone:    ['完成步骤', '完成步驟', '完成步驟', 'Step done'],
   codeHandoff:     ['上下文使用率较高，准备接力...', '上下文使用率較高，準備接力...', '上下文使用率較高，準備接力...', 'Context usage high, preparing handoff...'],
+  codeAllDone:     ['✓ 全部任务完成', '✓ 全部任務完成', '✓ 全部任務完成', 'All tasks completed'],
+  codeMoreSteps:   ['+{n} 步', '+{n} 步', '+{n} 步', '+{n} more'],
+  codeShowDetail:  ['查看详情', '查看詳情', '檢視詳情', 'Details'],
+  codeHideDetail:  ['收起详情', '收起詳情', '收起詳情', 'Hide'],
+  codeGeneratingReport: ['生成报告中...', '生成報告中...', '產生報告中...', 'Generating report...'],
+  codeThinkingLabel: ['思考中...', '思考中...', '思考中...', 'Thinking...'],
+  codeReportDone:  ['汇报完成', '匯報完成', '匯報完成', 'Report done'],
+  codeToolUsed:    ['使用工具', '使用工具', '使用工具', 'Tools'],
 
   // ── MCP ──
   mcpTabTitle:     ['MCP 服务器', 'MCP 伺服器', 'MCP 伺服器', 'MCP Servers'],

@@ -811,9 +811,11 @@ function previewFile(f) {
 }
 
 function formatSize(bytes) {
+    if (!bytes || bytes < 0) return '0 B'
     if (bytes < 1024) return bytes + ' B'
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-    return (bytes / 1048576).toFixed(1) + ' MB'
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
+    return (bytes / 1073741824).toFixed(2) + ' GB'
 }
 
 function pickDevice(d) {
@@ -1192,7 +1194,29 @@ async function buildMessages(tempId) {
 
     // Computer management mode
     if (computerMode.value) {
-      sysContent += '\n\n## 电脑管理模式\n当前已启用电脑管理功能，你可以直接访问用户的磁盘文件（C:、D:、E: 等所有盘符）。\n- 只读操作直接执行，不需要确认：list_directory、read_file、analyze_disk、search_files\n- 危险操作需确认（会弹窗）：delete_file、delete_directory\n- move_file_pc 直接执行，无需确认\n- 用完数据后用自己的话总结，不要原样输出原始数据\n- **禁止访问的只有系统内核路径**（System32\\、\\sys\\、\\proc\\ 等），其他路径全部允许'
+      sysContent += `
+## 电脑管理模式（只读）
+
+你已接入用户的电脑文件系统。**你只能读取和搜索，绝对不能写入、修改、删除任何文件。**
+
+### 你的能力
+- 使用 \`search_files\` 按文件名搜索文件 — 不需要完整路径，只要文件名关键词即可。系统会自动扫描所有盘符。
+- 使用 \`list_directory\` 浏览文件夹内容。
+- 使用 \`read_file\` 读取文本文件内容（代码、文档、日志、配置等）。
+- 使用 \`deliver_file\` 把文件投递给用户 — 用户说"给我这个文件"时调用，系统会生成下载链接。
+- 使用 \`system_info\` 查看电脑硬件和磁盘概况。
+- 使用 \`analyze_disk\` 分析磁盘空间占用，找出大文件和临时文件。
+
+### 交互规则
+- **用户不需要提供完整路径。** 用户说"看看我电脑里的图片" → 用 \`search_files\`。用户说"看看D盘" → 用 \`list_directory\`。用户说"有个叫XXX的文件帮我找找" → 用 \`search_files\`。
+- **找到多个匹配时，列出匹配给用户选择。** 不要说"未找到"然后放弃 — 列出所有匹配，说明文件位置和大小，让用户确认要哪一个。
+- **用户要文件就直接给。** 用户说"给我那个文件""发给我""把那个图片给我" → 用 \`deliver_file\` 投递。PDF、Word、图片、压缩包等二进制文件会自动转为下载链接。
+- **不要输出原始文件内容的纯文本列表。** 解读文件内容、总结要点、用自然语言告诉用户。
+- **禁止访问系统内核路径**（System32、\\sys\\、\\proc\\ 等），其余所有路径全部允许读取。
+
+### 安全限制
+- **严格只读。** 你没有 delete_file、delete_directory、move_file_pc 的权限 — 这些工具根本不存在于你的工具列表中。
+- 搜索时会自动跳过 node_modules、.git、$RECYCLE.BIN 等系统/临时目录。`
     }
 
     // Skills — installed skill directives
@@ -1375,6 +1399,10 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
             if (payload === '[DONE]') continue
             try {
                 const parsed = JSON.parse(payload)
+                // Handle server-side errors from SSE stream
+                if (parsed.error) {
+                    throw new Error(parsed.error)
+                }
                 const delta = parsed.choices?.[0]?.delta
                 if (delta?.reasoning_content) {
                     fullReasoning += delta.reasoning_content
@@ -1896,66 +1924,18 @@ For .pptx, use:
                 parameters: { type: 'object', properties: {}, required: [] }
             }
         }]
-        // ─── Computer Management tools (only when mode enabled) ───
+        // ─── Computer Management tools (只读模式 — CC风格) ───
         const computerTools = computerMode.value ? [
           ...[{
             type: 'function',
             function: {
-              name: 'system_info',
-              description: '获取系统信息：内存总量/剩余、CPU核心数、所有磁盘分区及空间使用情况。当用户问"内存多少"、"磁盘空间"、"电脑配置"时调用。',
-              parameters: { type: 'object', properties: {}, required: [] }
-            }
-          }],
-          ...[{
-            type: 'function',
-            function: {
-              name: 'list_directory',
-              description: '列出指定目录的内容。用于浏览用户电脑上的文件和文件夹。',
-              parameters: {
-                type: 'object',
-                properties: {
-                  dirPath: { type: 'string', description: '目录路径，默认用户主目录' },
-                  depth: { type: 'number', description: '扫描深度，1-4，默认2' }
-                }, required: []
-              }
-            }
-          }],
-          ...[{
-            type: 'function',
-            function: {
-              name: 'read_file',
-              description: '读取文件内容。用于查看用户电脑上的文本文件。',
-              parameters: {
-                type: 'object',
-                properties: {
-                  filePath: { type: 'string', description: '文件的完整路径' }
-                }, required: ['filePath']
-              }
-            }
-          }],
-          ...[{
-            type: 'function',
-            function: {
-              name: 'analyze_disk',
-              description: '分析磁盘空间使用情况，找出大文件和临时文件。当用户说"内存爆了"、"磁盘满了"、"帮我清理"、"看看哪些可以删"时调用。',
-              parameters: {
-                type: 'object',
-                properties: {
-                  scanPath: { type: 'string', description: '要扫描的路径，默认用户主目录' }
-                }, required: []
-              }
-            }
-          }],
-          ...[{
-            type: 'function',
-            function: {
               name: 'search_files',
-              description: '在电脑上搜索文件。按文件名关键词搜索。',
+              description: `在用户电脑上搜索文件。只需文件名关键词，不需要完整路径。自动扫描所有磁盘分区。找到多个匹配时列出所有结果让用户选择。当用户说"找找XXX""我电脑里有没有XXX""给我看看XXX"时，这是你的首选工具。`,
               parameters: {
                 type: 'object',
                 properties: {
-                  query: { type: 'string', description: '搜索关键词（文件名包含）' },
-                  searchPath: { type: 'string', description: '搜索路径，默认用户主目录' }
+                  query: { type: 'string', description: '文件名关键词（支持部分匹配）。例如："照片"、"简历"、"project"、".pdf"' },
+                  searchPath: { type: 'string', description: '可选。指定搜索起始路径（如 D:\\ 或 E:\\文档\\）。不填则搜索所有磁盘。' }
                 }, required: ['query']
               }
             }
@@ -1963,42 +1943,61 @@ For .pptx, use:
           ...[{
             type: 'function',
             function: {
-              name: 'delete_file',
-              description: `【危险操作—需要用户确认】删除指定文件。调用前必须先用文字告诉用户：1）要删什么 2）文件大小 3）删除原因和后果。explanation 参数填入你刚才给用户的说明文字，系统会弹出确认框让用户审批。`,
+              name: 'read_file',
+              description: `读取用户电脑上的文件内容。文本文件直接显示内容，二进制文件（图片、PDF、Word、压缩包等）自动转为下载链接。`,
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: '文件的完整路径' },
-                  explanation: { type: 'string', description: '操作说明：为什么删、文件大小、后果。用户将在确认框中看到这段文字。' }
-                }, required: ['filePath', 'explanation']
+                  filePath: { type: 'string', description: '文件完整路径（从 search_files 或 list_directory 结果中获取）' }
+                }, required: ['filePath']
               }
             }
           }],
           ...[{
             type: 'function',
             function: {
-              name: 'delete_directory',
-              description: `【危险操作—需要用户确认】删除整个文件夹及其内容。调用前必须先分析文件夹大小和文件数，用文字告诉用户。explanation 参数填入说明文字，系统弹出确认框。`,
+              name: 'deliver_file',
+              description: `把文件投递给用户。将文件复制到下载目录并生成下载链接。用户说"给我这个文件""发给我""把那个图片/文档传给我"时调用。支持所有文件类型（图片、文档、代码、压缩包等）。`,
               parameters: {
                 type: 'object',
                 properties: {
-                  dirPath: { type: 'string', description: '文件夹的完整路径' },
-                  explanation: { type: 'string', description: '操作说明：文件夹内容、大小、删除理由和后果。' }
-                }, required: ['dirPath', 'explanation']
+                  filePath: { type: 'string', description: '文件完整路径（从 search_files 或 list_directory 结果中获取）' }
+                }, required: ['filePath']
               }
             }
           }],
           ...[{
             type: 'function',
             function: {
-              name: 'move_file_pc',
-              description: '移动或重命名文件/文件夹。用于帮用户整理电脑文件。',
+              name: 'list_directory',
+              description: `列出文件夹内容。用于浏览用户电脑上的文件和子文件夹。`,
               parameters: {
                 type: 'object',
                 properties: {
-                  fromPath: { type: 'string', description: '源路径' },
-                  toPath: { type: 'string', description: '目标路径' }
-                }, required: ['fromPath', 'toPath']
+                  dirPath: { type: 'string', description: '目录路径。不填则显示用户主目录。可以是盘符根目录如 D:\\' },
+                  depth: { type: 'number', description: '扫描深度 1-4，默认2。depth=1只显示直接子项。' }
+                }, required: []
+              }
+            }
+          }],
+          ...[{
+            type: 'function',
+            function: {
+              name: 'system_info',
+              description: `获取电脑硬件概况：内存总量/剩余、CPU核心数、操作系统、各磁盘分区的总容量和剩余空间。当用户问"我电脑什么配置""内存多大""磁盘空间还剩多少"时调用。`,
+              parameters: { type: 'object', properties: {}, required: [] }
+            }
+          }],
+          ...[{
+            type: 'function',
+            function: {
+              name: 'analyze_disk',
+              description: `分析磁盘空间使用：找出大文件（>10MB）、临时文件、按文件类型统计空间占用。当用户说"磁盘怎么满了""哪些文件占空间大""帮我看看空间都去哪了"时调用。`,
+              parameters: {
+                type: 'object',
+                properties: {
+                  scanPath: { type: 'string', description: '要分析的目录路径，默认用户主目录' }
+                }, required: []
               }
             }
           }],
@@ -2142,16 +2141,12 @@ For .pptx, use:
                     toolResult = await handleListDirectory(args)
                 } else if (toolName === 'read_file') {
                     toolResult = await handleReadFile(args)
+                } else if (toolName === 'deliver_file') {
+                    toolResult = await handleDeliverFile(args)
                 } else if (toolName === 'analyze_disk') {
                     toolResult = await handleAnalyzeDisk(args)
                 } else if (toolName === 'search_files') {
                     toolResult = await handleSearchFiles(args)
-                } else if (toolName === 'delete_file') {
-                    toolResult = await handleDeleteFile(args)
-                } else if (toolName === 'delete_directory') {
-                    toolResult = await handleDeleteDirectory(args)
-                } else if (toolName === 'move_file_pc') {
-                    toolResult = await handleMoveFilePC(args)
                 } else if (executors[toolName]) {
                     toolResult = await executors[toolName](args)
                 } else {
@@ -2381,7 +2376,7 @@ For .pptx, use:
                     }
                 } catch (e) {
                     console.error('[retry] error:', e.message, e.stack)
-                    finalText = '网络异常，请检查连接后重试。'
+                    finalText = '请求失败了（' + (e.message || '网络异常') + '），请换一种问法或重试。'
                     if (msg) msg._isSystemFallback = true
                 }
             }
@@ -2786,7 +2781,7 @@ function handleListCollections() {
   })
 }
 
-// ═══ Computer Management handlers ═══
+// ═══ Computer Management handlers v2 (只读模式) ═══
 
 async function callComputerAPI(endpoint, body = {}) {
   const res = await fetch(`/api/computer/${endpoint}`, {
@@ -2806,7 +2801,7 @@ async function handleSystemInfo() {
     ).join('\n')
     return JSON.stringify({
       status: 'ok',
-      summary: `内存: ${data.totalMemoryGB}GB 总 / ${data.freeMemoryGB}GB 剩 (已用${data.usedMemoryPercent}%) | CPU: ${data.cpus}核 | ${data.platform}\n磁盘:\n${drives}`,
+      summary: `内存: ${data.totalMemoryGB}GB 总 / ${data.freeMemoryGB}GB 剩 (已用${data.usedMemoryPercent}%) | CPU: ${data.cpus}核 | ${data.platform} | 运行${Math.floor(data.uptime / 3600)}小时\n磁盘:\n${drives}`,
       raw: data
     })
   } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
@@ -2816,23 +2811,22 @@ async function handleListDirectory(args) {
   try {
     const data = await callComputerAPI('list-dir', { dirPath: args.dirPath, depth: args.depth || 2 })
     if (data.error) return JSON.stringify({ status: 'error', error: data.error })
-    // Return a summary to keep context small
     function flatten(node, indent = 0) {
       let lines = []
       const prefix = '  '.repeat(indent)
       if (node.type === 'directory') {
-        lines.push(prefix + node.name + '/')
+        lines.push(prefix + '📁 ' + node.name + '/')
         for (const child of (node.children || [])) {
           lines.push(...flatten(child, indent + 1))
         }
       } else {
-        const sizeMB = node.size ? ` (${(node.size / 1048576).toFixed(1)}MB)` : ''
-        lines.push(prefix + node.name + sizeMB)
+        const sizeStr = node.sizeDisplay || (node.size ? formatSize(node.size) : '')
+        lines.push(prefix + '📄 ' + node.name + (sizeStr ? ' (' + sizeStr + ')' : ''))
       }
       return lines
     }
-    const summary = flatten(data.tree).slice(0, 200).join('\n')
-    return JSON.stringify({ status: 'ok', summary, raw: data })
+    const summary = flatten(data.tree).slice(0, 300).join('\n')
+    return JSON.stringify({ status: 'ok', path: data.path, summary, raw: data })
   } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
 }
 
@@ -2840,7 +2834,42 @@ async function handleReadFile(args) {
   try {
     const data = await callComputerAPI('read-file', { filePath: args.filePath })
     if (data.error) return JSON.stringify({ status: 'error', error: data.error })
-    return JSON.stringify({ status: 'ok', name: data.name, size: data.size, lines: data.lines, content: data.content.slice(0, 8000) })
+    // Binary file → got a download URL
+    if (data.isBinary) {
+      // Auto-add to downloads so it shows in the UI
+      const fullUrl = BASE_URL + data.downloadUrl
+      const streamMsg = store._findStreamMsg(store.streamingId)
+      if (streamMsg?.msg) {
+        if (!streamMsg.msg._downloadFiles) streamMsg.msg._downloadFiles = []
+        if (!streamMsg.msg._downloadFiles.some(f => f.url === fullUrl)) {
+          streamMsg.msg._downloadFiles.push({ name: data.name, url: fullUrl, size: data.size })
+        }
+      }
+      return JSON.stringify({ status: 'ok', name: data.name, size: data.sizeDisplay, type: 'binary', downloadUrl: fullUrl, message: data.message })
+    }
+    // Large text file
+    if (data.isLarge) {
+      return JSON.stringify({ status: 'ok', name: data.name, size: data.sizeDisplay, type: 'text', large: true, preview: data.preview, message: data.message })
+    }
+    // Normal text file
+    return JSON.stringify({ status: 'ok', name: data.name, size: data.sizeDisplay, lines: data.lines, content: data.content.slice(0, 8000) })
+  } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
+}
+
+async function handleDeliverFile(args) {
+  try {
+    const data = await callComputerAPI('deliver-file', { filePath: args.filePath })
+    if (data.error) return JSON.stringify({ status: 'error', error: data.error })
+    // Add to message downloads so user sees the download bar
+    const fullUrl = BASE_URL + data.downloadUrl
+    const streamMsg = store._findStreamMsg(store.streamingId)
+    if (streamMsg?.msg) {
+      if (!streamMsg.msg._downloadFiles) streamMsg.msg._downloadFiles = []
+      if (!streamMsg.msg._downloadFiles.some(f => f.url === fullUrl)) {
+        streamMsg.msg._downloadFiles.push({ name: data.name, url: fullUrl, size: data.size })
+      }
+    }
+    return JSON.stringify({ status: 'ok', name: data.name, size: data.sizeDisplay, downloadUrl: fullUrl, message: data.message })
   } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
 }
 
@@ -2848,7 +2877,12 @@ async function handleAnalyzeDisk(args) {
   try {
     const data = await callComputerAPI('analyze-disk', { scanPath: args.scanPath })
     if (data.error) return JSON.stringify({ status: 'error', error: data.error })
-    return JSON.stringify(data)
+    const topFiles = (data.topLargeFiles || []).slice(0, 10).map(f => `${f.name} (${f.sizeDisplay || formatSize(f.size)})`).join(', ')
+    return JSON.stringify({
+      status: 'ok',
+      summary: `找到了 ${data.largeFileCount} 个大文件(>10MB) 和 ${data.tempFileCount} 个临时文件。最大的文件: ${topFiles || '无'}`,
+      raw: data
+    })
   } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
 }
 
@@ -2856,45 +2890,27 @@ async function handleSearchFiles(args) {
   try {
     const data = await callComputerAPI('search-files', { query: args.query, searchPath: args.searchPath })
     if (data.error) return JSON.stringify({ status: 'error', error: data.error })
-    const list = data.results.slice(0, 30).map(r => `${r.name} (${r.type === 'directory' ? '文件夹' : r.sizeMB + 'MB'}) - ${r.path}`).join('\n')
-    return JSON.stringify({ status: 'ok', count: data.count, results: list })
-  } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
-}
+    if (data.count === 0) {
+      return JSON.stringify({ status: 'ok', count: 0, results: '(未找到匹配文件)', hint: data.hint })
+    }
 
-async function handleDeleteFile(args) {
-  try {
-    // Show danger confirmation with AI's explanation
-    const approved = await showDangerConfirm(
-      '删除文件',
-      args.explanation || `删除 ${args.filePath}`,
-      '此操作不可恢复，文件将被永久删除。'
-    )
-    if (!approved) return JSON.stringify({ status: 'cancelled', message: '用户取消了删除操作' })
-    const data = await callComputerAPI('delete-file', { filePath: args.filePath })
-    if (data.error) return JSON.stringify({ status: 'error', error: data.error })
-    return JSON.stringify({ status: 'ok', message: `已删除: ${data.name}`, detail: data })
-  } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
-}
+    // Keep results compact to avoid blowing up the context
+    const MAX_SHOW = 25
+    const results = data.results.slice(0, MAX_SHOW).map((r, i) => {
+      const typeLabel = r.type === 'directory' ? '[文件夹]' : '[' + (r.ext || '文件') + ']'
+      const sizeLabel = r.sizeDisplay || (r.size ? formatSize(r.size) : '')
+      const timeLabel = r.mtime ? new Date(r.mtime).toLocaleDateString('zh-CN') : ''
+      return `${i + 1}. ${typeLabel} ${r.name}  ${sizeLabel}  ${timeLabel}\n   ${r.path}`
+    }).join('\n')
+    const extra = data.count > MAX_SHOW ? `\n\n... 还有 ${data.count - MAX_SHOW} 个匹配结果未列出。如需精确查找，请让用户指定更具体的关键词或盘符。` : ''
 
-async function handleDeleteDirectory(args) {
-  try {
-    const approved = await showDangerConfirm(
-      '删除文件夹',
-      args.explanation || `删除 ${args.dirPath}`,
-      '文件夹及其所有内容将被永久删除，不可恢复。'
-    )
-    if (!approved) return JSON.stringify({ status: 'cancelled', message: '用户取消了删除操作' })
-    const data = await callComputerAPI('delete-dir', { dirPath: args.dirPath })
-    if (data.error) return JSON.stringify({ status: 'error', error: data.error })
-    return JSON.stringify({ status: 'ok', message: `已删除: ${data.name} (${data.fileCount}个文件, ${data.totalSizeMB}MB)`, detail: data })
-  } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
-}
-
-async function handleMoveFilePC(args) {
-  try {
-    const data = await callComputerAPI('move-file', { fromPath: args.fromPath, toPath: args.toPath })
-    if (data.error) return JSON.stringify({ status: 'error', error: data.error })
-    return JSON.stringify({ status: 'ok', message: `已移动: ${data.name}`, detail: data })
+    return JSON.stringify({
+      status: 'ok',
+      count: data.count,
+      truncated: data.truncated || false,
+      hint: data.hint,
+      results: results + extra
+    })
   } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
 }
 

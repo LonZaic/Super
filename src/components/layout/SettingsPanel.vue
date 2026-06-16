@@ -37,7 +37,14 @@
               <ellipse cx="12" cy="12" rx="4" ry="9" stroke="currentColor" stroke-width="1.3"/>
               <path d="M3 12h18M12 3v18" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
             </svg>
-            语言
+            {{ t('switchLang') }}
+          </button>
+          <button :class="['sp-tab', { active: tab === 'theme' }]" @click="tab = 'theme'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M12 3a9 9 0 0 0 0 18c-4.5 0-8-4-8-9s3.5-9 8-9z" fill="currentColor"/>
+            </svg>
+            {{ t('appearance') }}
           </button>
           <button :class="['sp-tab', { active: tab === 'data' }]" @click="tab = 'data'">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -263,6 +270,50 @@
             </div>
           </template>
 
+          <!-- ═══ Theme Tab ═══ -->
+          <template v-if="tab === 'theme'">
+            <p class="sp-sub">选择界面配色主题。</p>
+            <div class="sp-theme-list">
+              <button
+                :class="['sp-theme-opt', { active: currentTheme === 'dark' }]"
+                @click="setTheme('dark')"
+              >
+                <span class="sp-theme-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M20 12A8 8 0 1 1 4.5 6.5 8 8 0 0 0 20 12z" fill="currentColor"/>
+                  </svg>
+                </span>
+                <span class="sp-theme-body">
+                  <span class="sp-theme-name">{{ t('darkMode') }}</span>
+                  <span class="sp-theme-desc">{{ t('themeDarkDesc') }}</span>
+                </span>
+                <svg v-if="currentTheme === 'dark'" width="16" height="16" viewBox="0 0 24 24" fill="none" class="sp-theme-check">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M8 12l3 3 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <button
+                :class="['sp-theme-opt', { active: currentTheme === 'light' }]"
+                @click="setTheme('light')"
+              >
+                <span class="sp-theme-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.3"/>
+                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </span>
+                <span class="sp-theme-body">
+                  <span class="sp-theme-name">{{ t('lightMode') }}</span>
+                  <span class="sp-theme-desc">{{ t('themeLightDesc') }}</span>
+                </span>
+                <svg v-if="currentTheme === 'light'" width="16" height="16" viewBox="0 0 24 24" fill="none" class="sp-theme-check">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M8 12l3 3 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </template>
+
           <!-- ═══ Data Tab ═══ -->
           <template v-if="tab === 'data'">
             <p class="sp-sub">导出或导入对话数据。</p>
@@ -295,6 +346,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useChatStore } from '../../store/chatStore.js'
+import { useSettingsStore } from '../../stores/settingsStore.js'
 import { loadSMTPConfig, saveSMTPConfig } from '../../utils/email.js'
 import { conversations as convApi } from '../../api/index.js'
 import { useI18n } from '../../composables/useI18n.js'
@@ -303,7 +355,14 @@ const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['close'])
 
 const store = useChatStore()
+const settingsStore = useSettingsStore()
 const { t, lang, setLang, langDisplay, LANG_META, isZh } = useI18n()
+
+// ── Theme ──
+const currentTheme = computed(() => settingsStore.theme)
+function setTheme(theme) {
+  settingsStore.setTheme(theme)
+}
 
 const tab = ref('api')
 const currentLang = computed(() => lang.value)
@@ -674,6 +733,32 @@ select.sp-input { font-family: inherit; cursor: pointer; }
 .sp-lang-en { font-size: 11px; color: var(--text3); font-weight: 300; }
 .sp-lang-opt.active .sp-lang-en { color: var(--text2); }
 .sp-lang-check { margin-left: auto; flex-shrink: 0; color: var(--accent); }
+
+/* Theme */
+.sp-theme-list { display: flex; flex-direction: column; gap: 8px; }
+.sp-theme-opt {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg3);
+  cursor: pointer; transition: all .12s; text-align: left;
+  font-family: inherit; font-size: 14px; color: var(--text2);
+}
+.sp-theme-opt:hover { border-color: var(--border2); background: var(--bg4); }
+.sp-theme-opt.active { border-color: var(--accent); background: var(--accent-muted); color: var(--accent); }
+.sp-theme-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--bg2); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.sp-theme-opt.active .sp-theme-icon {
+  background: var(--accent-muted); border-color: var(--accent);
+}
+.sp-theme-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.sp-theme-name { font-size: 14px; font-weight: 400; }
+.sp-theme-desc { font-size: 11px; color: var(--text3); font-weight: 300; }
+.sp-theme-opt.active .sp-theme-desc { color: var(--text2); }
+.sp-theme-check { margin-left: auto; flex-shrink: 0; color: var(--accent); }
 
 /* Data */
 .sp-data-actions { display: flex; gap: 8px; }

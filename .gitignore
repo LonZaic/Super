@@ -31,3 +31,12 @@ server/db/bbot.db*
 .vite-temp
 server/workspace/downloads/
 FIX_SUMMARY.md
+
+# Build output
+release/
+portable-test/
+*.exe
+*.zip
+*.blockmap
+builder-debug.yml
+latest.yml
