@@ -37,11 +37,15 @@ export function confirmDelete({
       ? 'rgba(248,81,73,0.12)'
       : 'rgba(248,81,73,0.06)'
 
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light'
+    const overlayBg = isLight ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.55)'
+    const boxShadow = isLight ? '0 12px 40px rgba(0,0,0,0.12)' : '0 16px 48px rgba(0,0,0,0.7)'
+
     const overlay = document.createElement('div')
     overlay.className = 'cfm-overlay'
     overlay.style.cssText = `
       position:fixed;inset:0;z-index:9999;
-      background:rgba(0,0,0,0.55);
+      background:${overlayBg};
       display:flex;align-items:center;justify-content:center;
       animation:cfmFadeIn .15s ease;
     `
@@ -51,7 +55,7 @@ export function confirmDelete({
     box.style.cssText = `
       background:var(--bg,#1a1916);border:1px solid var(--border,rgba(255,255,255,0.08));
       border-radius:12px;padding:24px;width:360px;max-width:92vw;
-      box-shadow:0 16px 48px rgba(0,0,0,0.7);
+      box-shadow:${boxShadow};
       animation:cfmSlideUp .2s cubic-bezier(0.16,1,0.3,1);
     `
 

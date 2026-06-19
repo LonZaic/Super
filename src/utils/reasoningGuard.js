@@ -40,11 +40,23 @@ const LEAK_PATTERNS = [
  * Returns clean text with any detected leaks replaced by [...].
  * Handles streaming: incremental filtering of cumulative text.
  */
+/**
+ * Sanitize reasoning/thinking text to prevent system prompt leaks.
+ * Returns clean text with any detected leaks replaced by [...].
+ * Handles streaming: incremental filtering of cumulative text.
+ * Also strips XML tool-call tags so they don't clutter the thinking fold.
+ */
 export function sanitizeReasoning(text) {
   let result = text
   for (const pattern of LEAK_PATTERNS) {
     result = result.replace(pattern, '[...]')
   }
+  // Strip XML tool-call tags that may leak into reasoning content
+  result = result.replace(/<\s*(\w*:?\s*)?invoke\s+name\s*=\s*"[^"]*"\s*>[^]*?<\s*\/\s*(\w*:?\s*)?invoke\s*>/gi, '')
+  result = result.replace(/<\s*(\w*:?\s*)?(?:function_calls|tool_calls)\s*>[^]*?<\s*\/\s*(\w*:?\s*)?(?:function_calls|tool_calls)\s*>/gi, '')
+  result = result.replace(/<[|｜]{2}\s*DSML\s*[|｜]{2}[^]*?<\/[|｜]{2}\s*DSML\s*[|｜]{2}>/gi, '')
+  const TOOL_TAGS = 'invoke|function_calls|tool_calls?|parameter|DSML|save_file|create_zip|svg_to_image|create_gif|create_document|create_pdf|create_audio|convert|web_search|web_fetch|get_weather|save_to_collection|rename_collection|move_last_saved|update_last_saved|delete_last_saved|list_collections|request_design_preview|classify_intent|send_email|schedule_email|search_files|list_directory|read_file|deliver_file|system_info|analyze_disk'
+  result = result.replace(new RegExp('<\\/?\\s*(' + TOOL_TAGS + ')\\b[^>]*>', 'gi'), '')
   return result
 }
 

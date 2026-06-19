@@ -127,7 +127,7 @@
       color: #999;
     }
     .typing .bubble::after {
-      content: " ⚡";
+      content: "";
       animation: blink 1s step-end infinite;
     }
     @keyframes blink { 50% { opacity: 0; } }
@@ -142,7 +142,7 @@
 
     <div class="messages" id="messages">
       <div class="msg ai">
-        <div class="avatar">🤖</div>
+        <div class="avatar">AI</div>
         <div class="bubble">你好！我是 AI 助手。<br />有什么需要帮忙的吗？</div>
       </div>
     </div>
@@ -161,7 +161,7 @@
     function addMessage(role, text) {
       const div = document.createElement('div');
       div.className = 'msg ' + role;
-      const avatar = role === 'user' ? '🧑' : '🤖';
+      const avatar = role === 'user' ? 'You' : 'AI';
       div.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble">${text}</div>`;
       messages.appendChild(div);
       messages.scrollTop = messages.scrollHeight;
@@ -171,7 +171,7 @@
       const div = document.createElement('div');
       div.className = 'msg ai typing';
       div.id = 'typing';
-      div.innerHTML = `<div class="avatar">🤖</div><div class="bubble">思考中</div>`;
+      div.innerHTML = `<div class="avatar">AI</div><div class="bubble">思考中</div>`;
       messages.appendChild(div);
       messages.scrollTop = messages.scrollHeight;
     }

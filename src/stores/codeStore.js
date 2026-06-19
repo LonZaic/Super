@@ -16,7 +16,10 @@ import {
   deleteCodeConversation,
 } from '../db/database.js'
 import { readFileContent } from '../api/code.api.js'
+import { codeConversations as codeApi } from '../api/index.js'
 import { reconstructCompactState } from '../utils/codeCompact.js'
+
+let _serverAvailable = true // Assume server is available, disable on first failure
 
 export const useCodeStore = defineStore('code', () => {
   const projectPath = ref('')
@@ -28,6 +31,7 @@ export const useCodeStore = defineStore('code', () => {
   const openTabs = ref([])
   const openFiles = ref([])
   const activeFilePath = ref('')
+  const selectedFolder = ref('')  // currently selected folder path for file creation context
   const pendingDiffs = ref([])
   const tasks = ref([])
   const handoffCount = ref(0) // track context handoffs
@@ -121,9 +125,12 @@ export const useCodeStore = defineStore('code', () => {
     conversations.value = getCodeConversations()
   }
 
-  function createConversation(title) {
+  async function createConversation(title) {
     const id = 'code_' + Date.now()
     dbCreate(id, title || 'Code 对话', projectPath.value, projectName.value)
+    if (_serverAvailable) {
+      try { await codeApi.create(id, title || 'Code 对话', projectPath.value, projectName.value) } catch { _serverAvailable = false }
+    }
     conversations.value = getCodeConversations()
     currentId.value = id
     messagesMap.value[id] = []
@@ -152,13 +159,11 @@ export const useCodeStore = defineStore('code', () => {
           _timer: r.timer || '',
           _expanded: true,
         }
-        // Reconstruct compact state for AI messages
         if (r.role === 'ai') {
           msg._compactState = reconstructCompactState(msg)
         }
         return msg
       })
-      // Load task state from last message
       const last = rows[rows.length - 1]
       if (last?.tasks_json) {
         try { tasks.value = JSON.parse(last.tasks_json) } catch {}
@@ -166,7 +171,6 @@ export const useCodeStore = defineStore('code', () => {
     }
     currentId.value = id
     if (!openTabs.value.includes(id)) openTabs.value.push(id)
-    // Restore project from conversation
     const conv = conversations.value.find(c => c.id === id)
     if (conv?.project_path) {
       projectPath.value = conv.project_path
@@ -197,31 +201,54 @@ export const useCodeStore = defineStore('code', () => {
 
   function addUserMessage(text) {
     if (!currentId.value) return -1
-    return addCodeMessage(currentId.value, 'user', text, '', '', '[]', '[]', false, false, '')
+    const id = addCodeMessage(currentId.value, 'user', text, '', '', '[]', '[]', false, false, '')
+    if (_serverAvailable) {
+      codeApi.addMessage(currentId.value, { role: 'user', text }).catch(() => { _serverAvailable = false })
+    }
+    return id
   }
 
   function addAiMessage(text, html, thinking, tasksJson, eventsJson, done, error, timer) {
     if (!currentId.value) return -1
-    return addCodeMessage(currentId.value, 'ai', text, html, thinking,
+    const id = addCodeMessage(currentId.value, 'ai', text, html, thinking,
       tasksJson || JSON.stringify(tasks.value),
       eventsJson || '[]',
       done || false, error || false, timer || ''
     )
+    if (_serverAvailable) {
+      codeApi.addMessage(currentId.value, {
+        role: 'ai', text, html, thinking, tasksJson: tasksJson || JSON.stringify(tasks.value),
+        eventsJson: eventsJson || '[]', done: done ? 1 : 0, error: error ? 1 : 0, timer: timer || ''
+      }).catch(() => { _serverAvailable = false })
+    }
+    return id
   }
 
   function updateMessageText(dbId, text, html, thinking, eventsJson, done, error, timer) {
     if (!dbId || dbId < 0) return
     updateCodeMessage(dbId, text, html, thinking, JSON.stringify(tasks.value),
       eventsJson || '[]', done ? 1 : 0, error ? 1 : 0, timer || '')
+    if (_serverAvailable && currentId.value) {
+      codeApi.updateMessage(currentId.value, dbId, {
+        text, html, thinking, tasksJson: JSON.stringify(tasks.value),
+        eventsJson: eventsJson || '[]', done: done ? 1 : 0, error: error ? 1 : 0, timer: timer || ''
+      }).catch(() => { _serverAvailable = false })
+    }
   }
 
   function renameConversation(id, title) {
     updateCodeConversationTitle(id, title)
+    if (_serverAvailable) {
+      codeApi.update(id, { title }).catch(() => { _serverAvailable = false })
+    }
     conversations.value = getCodeConversations()
   }
 
   function deleteConversation(id) {
     deleteCodeConversation(id)
+    if (_serverAvailable) {
+      codeApi.delete(id).catch(() => { _serverAvailable = false })
+    }
     conversations.value = getCodeConversations()
     delete messagesMap.value[id]
     openTabs.value = openTabs.value.filter(t => t !== id)
@@ -284,7 +311,7 @@ export const useCodeStore = defineStore('code', () => {
   return {
     projectPath, projectName, fileTree,
     conversations, currentId, messagesMap, openTabs, messages, openTabList,
-    openFiles, activeFilePath, pendingDiffs,
+    openFiles, activeFilePath, selectedFolder, pendingDiffs,
     tasks, handoffCount,
     setProject, setFileTree,
     openFile, closeFile, updateFileContent,

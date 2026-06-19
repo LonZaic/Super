@@ -3,9 +3,13 @@ import {
     createConversation as dbCreateConv,
     getMessages, addMessage, getConversations,
     deleteConversation, updateConversationTitle,
-    updateMessage, deleteMessage, deleteMessagesSince
+    updateMessage, deleteMessage, deleteMessagesSince,
+    updateMessageSideQuest,
+    getFolders, createFolder as dbCreateFolder,
+    renameFolder as dbRenameFolder, deleteFolder as dbDeleteFolder,
+    moveConversation as dbMoveConversation, moveFolder as dbMoveFolder
 } from '../db/database.js'
-import { conversations as convApi } from '../api/index.js'
+import { conversations as convApi, foldersApi } from '../api/index.js'
 import { sanitizeReasoning } from '../utils/reasoningGuard.js'
 
 const _abortMap = {}  // per-conversation abort controllers
@@ -17,6 +21,8 @@ export const useChatStore = defineStore('chat', {
         messagesMap: {},        // { [convId]: message[] } — keep all open convs in memory
         branchStateMap: {},     // { [convId]: { parentId: msgId } }
         openTabs: [],           // [convId, ...] ordered by open time
+        folders: [],            // [{ id, name, parent_id, sort_order, created_at }]
+        expandedFolders: {},    // { [folderId]: boolean }
         apikey: '',
         model: 'deepseek-v4-flash',
         permissionMode: 'default',   // 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions'
@@ -63,18 +69,36 @@ export const useChatStore = defineStore('chat', {
         },
 
         hasApikey: (state) => state.apikey.length > 0,
+
+        rootConversations(state) {
+            return (state.conversations || []).filter(c => !c.folder_id)
+        },
+
+        topLevelFolders(state) {
+            return (state.folders || []).filter(f => !f.parent_id)
+        },
+
+        folderChildren(state) {
+            return (parentId) => ({
+                folders: (state.folders || []).filter(f => f.parent_id === parentId),
+                conversations: (state.conversations || []).filter(c => c.folder_id === parentId),
+            })
+        },
     },
 
     actions: {
         // ─── helpers ───
         _useServerApi() {
-            return !!localStorage.getItem('bbot_token')
+            // Data stored on server disk (bbot.db) via API.
+            // Local sql.js is the fallback if server is unreachable.
+            return true
         },
 
         _hydrateMsg(m) {
             let files = []
             let designs = []
             let downloadFiles = []
+            let sideQuest = null
             if (m.files && m.files !== '[]') {
                 try { files = JSON.parse(m.files) } catch {}
             }
@@ -86,7 +110,11 @@ export const useChatStore = defineStore('chat', {
             if (dlRaw && dlRaw !== '[]') {
                 try { downloadFiles = JSON.parse(dlRaw) } catch {}
             }
-            return { ...m, files, designs, _downloadFiles: downloadFiles, reasoning: m.reasoning || '' }
+            // Parse side_quest (persisted follow-up Q&A)
+            if (m.side_quest && m.side_quest !== '' && m.side_quest !== 'null') {
+                try { sideQuest = JSON.parse(m.side_quest) } catch {}
+            }
+            return { ...m, files, designs, _downloadFiles: downloadFiles, reasoning: m.reasoning || '', _sideQuest: sideQuest }
         },
 
         _initBranch(msgs) {
@@ -106,6 +134,7 @@ export const useChatStore = defineStore('chat', {
                     currentId: this.currentId,
                     openTabs: this.openTabs,
                     branchStateMap: this.branchStateMap,
+                    expandedFolders: this.expandedFolders,
                 }
                 localStorage.setItem('ds_session', JSON.stringify(data))
             } catch {}
@@ -114,69 +143,38 @@ export const useChatStore = defineStore('chat', {
         async _restoreSession() {
             try {
                 const raw = localStorage.getItem('ds_session')
-                if (!raw) return
-                const data = JSON.parse(raw)
+                const data = raw ? JSON.parse(raw) : {}
                 if (data.branchStateMap) this.branchStateMap = data.branchStateMap
+                if (data.expandedFolders) this.expandedFolders = data.expandedFolders
 
+                // Try server API first, fallback to local sql.js
+                let localConvs = []
                 if (this._useServerApi()) {
-                    // ── Server mode: load from API ──
-                    this.conversations = await convApi.list()
-
-                    if (data.openTabs && data.openTabs.length) {
-                        const existing = this.conversations.map(c => c.id)
-                        this.openTabs = data.openTabs.filter(id => existing.includes(id))
-                    }
-                    if (data.currentId) {
-                        const exists = this.conversations.some(c => c.id === data.currentId)
-                        if (exists) {
-                            this.currentId = data.currentId
-                            if (!this.messagesMap[data.currentId]) {
-                                const result = await convApi.get(data.currentId)
-                                this.messagesMap[data.currentId] = (result.messages || []).map(m => this._hydrateMsg(m))
-                                if (!this.branchStateMap[data.currentId]) {
-                                    this.branchStateMap[data.currentId] = this._initBranch(this.messagesMap[data.currentId])
-                                }
-                            }
-                        }
-                    }
-                    for (const tid of this.openTabs) {
-                        if (!this.messagesMap[tid]) {
-                            try {
-                                const result = await convApi.get(tid)
-                                this.messagesMap[tid] = (result.messages || []).map(m => this._hydrateMsg(m))
-                                if (!this.branchStateMap[tid]) {
-                                    this.branchStateMap[tid] = this._initBranch(this.messagesMap[tid])
-                                }
-                            } catch { /* conv may not exist on server */ }
-                        }
+                    try {
+                        localConvs = await convApi.list() || []
+                        this.conversations = localConvs
+                    } catch (e) {
+                        console.warn('[Session] Server load failed, using local:', e.message)
+                        localConvs = getConversations()
+                        if (localConvs.length) this.conversations = localConvs
                     }
                 } else {
-                    // ── Local mode: load from sql.js ──
-                    this.conversations = getConversations()
+                    localConvs = getConversations()
+                    if (localConvs.length) this.conversations = localConvs
+                }
 
-                    if (data.openTabs && data.openTabs.length) {
-                        const existing = getConversations().map(c => c.id)
-                        this.openTabs = data.openTabs.filter(id => existing.includes(id))
-                    }
-                    if (data.currentId) {
-                        const existing = getConversations().map(c => c.id)
-                        if (existing.includes(data.currentId)) {
-                            this.currentId = data.currentId
-                            if (!this.messagesMap[data.currentId]) {
-                                this.messagesMap[data.currentId] = getMessages(data.currentId).map(m => this._hydrateMsg(m))
-                                if (!this.branchStateMap[data.currentId]) {
-                                    this.branchStateMap[data.currentId] = this._initBranch(this.messagesMap[data.currentId])
-                                }
-                            }
-                        }
-                    }
-                    for (const tid of this.openTabs) {
-                        if (!this.messagesMap[tid]) {
-                            this.messagesMap[tid] = getMessages(tid).map(m => this._hydrateMsg(m))
-                            if (!this.branchStateMap[tid]) {
-                                this.branchStateMap[tid] = this._initBranch(this.messagesMap[tid])
-                            }
-                        }
+                // Restore tabs from session
+                if (data.openTabs && data.openTabs.length) {
+                    const ids = this.conversations.map(c => c.id)
+                    this.openTabs = data.openTabs.filter(id => ids.includes(id))
+                }
+                if (data.currentId && this.conversations.some(c => c.id === data.currentId)) {
+                    this.currentId = data.currentId
+                    await this._loadConvMessages(data.currentId)
+                }
+                for (const tid of this.openTabs) {
+                    if (!this.messagesMap[tid]) {
+                        await this._loadConvMessages(tid)
                     }
                 }
             } catch (e) {
@@ -184,36 +182,41 @@ export const useChatStore = defineStore('chat', {
             }
         },
 
-        // ─── conversation ───
-        async createConversation(id) {
-            if (!this.apikey) this.loadApiKey()
-
+        async _loadConvMessages(convId) {
             if (this._useServerApi()) {
-                await convApi.create(id, this.model)
-            } else {
-                dbCreateConv(id, this.model)
-            }
-
-            this.currentId = id
-
-            if (this._useServerApi()) {
-                // Server mode: load the just-created conversation
                 try {
-                    const result = await convApi.get(id)
-                    this.messagesMap[id] = (result.messages || []).map(m => this._hydrateMsg(m))
-                    this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
-                } catch {
-                    // Fallback: empty messages with welcome message
-                    this.messagesMap[id] = []
-                    this.branchStateMap[id] = {}
+                    const msgs = await convApi.messages(convId) || []
+                    this.messagesMap[convId] = msgs.map(m => this._hydrateMsg(m))
+                    this.branchStateMap[convId] = this._initBranch(msgs)
+                    return
+                } catch (e) {
+                    console.warn('[Session] API messages load failed:', e.message)
                 }
-                this.conversations = await convApi.list()
-            } else {
-                this.messagesMap[id] = getMessages(id).map(m => this._hydrateMsg(m))
-                this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
-                this.conversations = getConversations()
             }
+            // Fallback to local sql.js
+            const msgs = getMessages(convId).map(m => this._hydrateMsg(m))
+            this.messagesMap[convId] = msgs
+            this.branchStateMap[convId] = this._initBranch(msgs)
+        },
 
+        // ─── conversation ───
+        async createConversation(id, folderId = null) {
+            if (!this.apikey) this.loadApiKey()
+            if (this._useServerApi()) {
+                try {
+                    await convApi.create(id, this.model)
+                } catch (e) {
+                    console.warn('[Store] API create conv failed, using local:', e.message)
+                    dbCreateConv(id, this.model, folderId)
+                }
+            } else {
+                dbCreateConv(id, this.model, folderId)
+            }
+            this.currentId = id
+            await this._loadConvMessages(id)
+            this.conversations = this._useServerApi()
+                ? ((await convApi.list().catch(() => getConversations())) || [])
+                : getConversations()
             if (!this.openTabs.includes(id)) {
                 this.openTabs.push(id)
             }
@@ -221,10 +224,8 @@ export const useChatStore = defineStore('chat', {
         },
 
         async loadMessages(id) {
-            // Guard: never overwrite messages that were already loaded/created
             const existing = this.messagesMap[id]
             if (existing && existing.length > 0) {
-                // Already have messages — just ensure tab is open
                 this.currentId = id
                 if (!this.openTabs.includes(id)) {
                     this.openTabs.push(id)
@@ -232,19 +233,7 @@ export const useChatStore = defineStore('chat', {
                 this._saveSession()
                 return
             }
-            if (this._useServerApi()) {
-                try {
-                    const result = await convApi.get(id)
-                    this.messagesMap[id] = (result.messages || []).map(m => this._hydrateMsg(m))
-                    this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
-                } catch {
-                    this.messagesMap[id] = []
-                    this.branchStateMap[id] = {}
-                }
-            } else {
-                this.messagesMap[id] = getMessages(id).map(m => this._hydrateMsg(m))
-                this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
-            }
+            await this._loadConvMessages(id)
             this.currentId = id
             if (!this.openTabs.includes(id)) {
                 this.openTabs.push(id)
@@ -254,40 +243,37 @@ export const useChatStore = defineStore('chat', {
 
         async loadConversations() {
             if (this._useServerApi()) {
-                this.conversations = await convApi.list()
-            } else {
-                this.conversations = getConversations()
+                try {
+                    this.conversations = await convApi.list() || []
+                    this.folders = await foldersApi.list().catch(() => getFolders())
+                    return
+                } catch (e) {
+                    console.warn('[Store] API load convs failed:', e.message)
+                }
             }
+            this.conversations = getConversations()
+            this.folders = getFolders()
         },
 
         async deleteConv(id) {
             if (this._useServerApi()) {
-                await convApi.delete(id).catch(() => {})
-            } else {
-                deleteConversation(id)
+                try { await convApi.delete(id) } catch {}
             }
+            deleteConversation(id)
             delete this.messagesMap[id]
             delete this.branchStateMap[id]
             this.openTabs = this.openTabs.filter(t => t !== id)
-            // Clear currentId if we just deleted the active conversation
             if (this.currentId === id) {
                 this.currentId = null
             }
-            // reload list
-            if (this._useServerApi()) {
-                this.conversations = await convApi.list()
-            } else {
-                this.conversations = getConversations()
-            }
+            this.conversations = this._useServerApi()
+                ? ((await convApi.list().catch(() => getConversations())) || [])
+                : getConversations()
             this._saveSession()
         },
 
         updateConvTitle(id, title) {
-            if (this._useServerApi()) {
-                convApi.updateTitle(id, title).catch(() => {})
-            } else {
-                updateConversationTitle(id, title)
-            }
+            updateConversationTitle(id, title)
             const conv = this.conversations.find(c => c.id === id)
             if (conv) {
                 conv.title = title
@@ -296,19 +282,17 @@ export const useChatStore = defineStore('chat', {
             if (id === this.currentId) {
                 document.title = title + ' - Agent Chat'
             }
+            // Also update on server
+            if (this._useServerApi()) {
+                convApi.updateTitle(id, title).catch(() => {})
+            }
         },
 
         // ─── tabs ───
-        switchTab(id) {
+        async switchTab(id) {
             if (id === this.currentId) return
-            // auto-load if not in cache
             if (!this.messagesMap[id]) {
-                // Load synchronously for local, mark for async load
-                if (!this._useServerApi()) {
-                    this.messagesMap[id] = getMessages(id).map(m => this._hydrateMsg(m))
-                    this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
-                }
-                // For server mode, the caller (HomeView/ChatView) should have already loaded via loadMessages
+                await this._loadConvMessages(id)
             }
             this.currentId = id
             if (!this.openTabs.includes(id)) {
@@ -337,40 +321,24 @@ export const useChatStore = defineStore('chat', {
             if (!this.currentId) return null
             const filesJson = JSON.stringify(files)
 
-            let newId
-            if (this._useServerApi()) {
-                // Optimistic: generate temp ID, persist async
-                newId = 'temp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-                const msg = { role: 'user', text, id: newId, files }
-                const msgs = this.messagesMap[this.currentId] || []
-                msgs.push(msg)
-                this.messagesMap[this.currentId] = msgs
-
-                // Persist to server
-                try {
-                    const result = await convApi.addMessage(this.currentId, {
-                        role: 'user', text, files: filesJson
-                    })
-                    // Replace temp ID with real server ID
-                    const realId = result.id
-                    const msgs2 = this.messagesMap[this.currentId] || []
-                    const found = msgs2.find(m => m.id === newId)
-                    if (found) found.id = realId
-                    this.messagesMap[this.currentId] = [...msgs2]
-                    newId = realId
-                } catch (e) {
-                    console.warn('[chatStore] addUserMessage server failed:', e.message)
-                }
-            } else {
-                newId = addMessage(this.currentId, 'user', text, null, filesJson)
-                const msg = { role: 'user', text, id: newId, files }
-                const msgs = this.messagesMap[this.currentId] || []
-                msgs.push(msg)
-                this.messagesMap[this.currentId] = msgs
-            }
-            this._saveSession()
+            // ALWAYS use local sql.js first — synchronous, gets real ID immediately.
+            // This is critical: ChatView calls addUserMessage() without await,
+            // then immediately calls startStreamReply() which must find this message.
+            const newId = addMessage(this.currentId, 'user', text, null, filesJson)
+            const msg = { role: 'user', text, id: newId, files }
             const msgs = this.messagesMap[this.currentId] || []
-            return msgs.find(m => m.id === newId) || null
+            msgs.push(msg)
+            this.messagesMap[this.currentId] = msgs
+            this._saveSession()
+
+            // Sync to server API in background (don't block the UI)
+            if (this._useServerApi()) {
+                convApi.addMessage(this.currentId, {
+                    role: 'user', text, parent_id: null, files: filesJson
+                }).catch(() => {})
+            }
+
+            return msg
         },
 
         startStreamReply(convId) {
@@ -388,6 +356,9 @@ export const useChatStore = defineStore('chat', {
             msgs.push({
                 role: 'ai', text: '', reasoning: '', id: tempId,
                 streaming: true, parent_id: parentId,
+                _liveSvg: '', _rawText: '', designs: [], _agentEvents: [],
+                _downloadFiles: [], _devicePicker: false, _designSummary: '',
+                _sideQuest: null,
             })
             this.messagesMap[cid] = msgs
             this.streamingId = tempId
@@ -433,6 +404,12 @@ export const useChatStore = defineStore('chat', {
             if (r) r.msg.text = cleanText
         },
 
+        // Live SVG rendering during streaming — "一笔一笔画" box
+        updateStreamLiveSvg(tempId, svgContent) {
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg._liveSvg = svgContent
+        },
+
         updateStreamAgentEvents(tempId, events) {
             const r = this._findStreamMsg(tempId)
             if (r) r.msg._agentEvents = [...events]
@@ -448,22 +425,19 @@ export const useChatStore = defineStore('chat', {
             const { msg, msgs, convId } = r
             const designsJson = JSON.stringify(msg.designs || [])
             const reasoning = msg.reasoning || ''
+            const sideQuestJson = JSON.stringify(msg._sideQuest || null)
+            const downloadFilesJson = JSON.stringify(msg._downloadFiles || [])
 
-            let realId
+            // ALWAYS save locally first (synchronous, gets real ID immediately)
+            const realId = addMessage(convId, 'ai', msg.text, msg.parent_id, '[]', designsJson, reasoning, downloadFilesJson, sideQuestJson)
+
+            // Sync to server API in background
             if (this._useServerApi()) {
-                try {
-                    const result = await convApi.addMessage(convId, {
-                        role: 'ai', text: msg.text, parent_id: msg.parent_id,
-                        files: '[]', designs: designsJson, reasoning,
-                        downloadFiles: JSON.stringify(msg._downloadFiles || [])
-                    })
-                    realId = result.id
-                } catch (e) {
-                    console.warn('[chatStore] finishStreamReply server failed:', e.message)
-                    realId = 'failed_' + Date.now()
-                }
-            } else {
-                realId = addMessage(convId, 'ai', msg.text, msg.parent_id, '[]', designsJson, reasoning, JSON.stringify(msg._downloadFiles || []))
+                convApi.addMessage(convId, {
+                    role: 'ai', text: msg.text, parent_id: msg.parent_id,
+                    files: '[]', designs: designsJson, reasoning,
+                    downloadFiles: downloadFilesJson, sideQuest: sideQuestJson
+                }).catch(() => {})
             }
 
             const idx = msgs.findIndex(m => m.id === tempId)
@@ -477,6 +451,8 @@ export const useChatStore = defineStore('chat', {
                 _devicePicker: msg._devicePicker || false,
                 _designSummary: msg._designSummary || '',
                 _isSystemFallback: msg._isSystemFallback || false,
+                _liveSvg: msg._liveSvg || '',
+                _sideQuest: msg._sideQuest || null,
             }
             if (idx !== -1) {
                 msgs[idx] = finalMsg
@@ -493,6 +469,17 @@ export const useChatStore = defineStore('chat', {
             this._lastFinishedMsg = finalMsg
             this._saveSession()
             return realId
+        },
+
+        // ─── Side Quest (侧边提问) ───
+        setSideQuest(msgId, data) {
+            const convId = this.currentId
+            const msgs = this.messagesMap[convId] || []
+            const msg = msgs.find(m => m.id === msgId)
+            if (!msg) return
+            msg._sideQuest = data
+            const json = data ? JSON.stringify(data) : ''
+            updateMessageSideQuest(msgId, json)
         },
 
         // ─── branch navigation ───
@@ -539,10 +526,9 @@ export const useChatStore = defineStore('chat', {
         },
 
         editMessage(id, text) {
-            if (this._useServerApi()) {
+            updateMessage(id, text)
+            if (this._useServerApi() && this.currentId) {
                 convApi.updateMessage(this.currentId, id, text).catch(() => {})
-            } else {
-                updateMessage(id, text)
             }
             const msgs = this.messagesMap[this.currentId] || []
             const msg = msgs.find(m => m.id === id)
@@ -550,10 +536,9 @@ export const useChatStore = defineStore('chat', {
         },
 
         removeMessage(id) {
-            if (this._useServerApi()) {
+            deleteMessage(id)
+            if (this._useServerApi() && this.currentId) {
                 convApi.deleteMessage(this.currentId, id).catch(() => {})
-            } else {
-                deleteMessage(id)
             }
             const msgs = this.messagesMap[this.currentId] || []
             this.messagesMap[this.currentId] = msgs.filter(m => m.id !== id)
@@ -568,10 +553,9 @@ export const useChatStore = defineStore('chat', {
 
         truncateAfter(messageId) {
             if (!this.currentId) return
+            deleteMessagesSince(this.currentId, messageId)
             if (this._useServerApi()) {
                 convApi.truncate(this.currentId, messageId).catch(() => {})
-            } else {
-                deleteMessagesSince(this.currentId, messageId)
             }
             const msgs = this.messagesMap[this.currentId] || []
             const idx = msgs.findIndex(m => m.id === messageId)
@@ -612,6 +596,91 @@ export const useChatStore = defineStore('chat', {
         setPermissionMode(mode) {
             this.permissionMode = mode
             localStorage.setItem('permissionMode', mode)
+        },
+
+        // ─── folder CRUD ───
+        async loadFolders() {
+            this.folders = getFolders()
+        },
+
+        async createFolder(name, parentId = null) {
+            const id = 'folder_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+            dbCreateFolder(id, name, parentId)
+            if (this._useServerApi()) {
+                foldersApi.create(name, parentId).catch(() => {})
+            }
+            this.folders = getFolders()
+            if (parentId) {
+                this.expandedFolders[parentId] = true
+            }
+            this._saveSession()
+            return id
+        },
+
+        renameFolder(id, name) {
+            dbRenameFolder(id, name)
+            if (this._useServerApi()) {
+                foldersApi.rename(id, name).catch(() => {})
+            }
+            const f = this.folders.find(x => x.id === id)
+            if (f) f.name = name
+            this.folders = [...this.folders]
+            this._saveSession()
+        },
+
+        deleteFolder(id) {
+            const getDescendants = (pid) => {
+                const children = this.folders.filter(f => f.parent_id === pid)
+                let ids = children.map(f => f.id)
+                for (const c of children) {
+                    ids = ids.concat(getDescendants(c.id))
+                }
+                return ids
+            }
+            const descIds = getDescendants(id)
+
+            dbDeleteFolder(id)
+            if (this._useServerApi()) {
+                foldersApi.delete(id).catch(() => {})
+            }
+            this.folders = getFolders()
+            this.conversations = getConversations()
+            delete this.expandedFolders[id]
+            for (const did of descIds) {
+                delete this.expandedFolders[did]
+            }
+            this._saveSession()
+        },
+
+        moveConversation(convId, folderId) {
+            dbMoveConversation(convId, folderId)
+            const conv = this.conversations.find(c => c.id === convId)
+            if (conv) {
+                conv.folder_id = folderId || null
+            }
+            this.conversations = [...this.conversations]
+            this._saveSession()
+        },
+
+        moveFolder(folderId, newParentId) {
+            dbMoveFolder(folderId, newParentId)
+            if (this._useServerApi()) {
+                foldersApi.move(folderId, newParentId).catch(() => {})
+            }
+            const f = this.folders.find(x => x.id === folderId)
+            if (f) {
+                f.parent_id = newParentId || null
+            }
+            this.folders = [...this.folders]
+            this._saveSession()
+        },
+
+        toggleFolderExpanded(id) {
+            this.expandedFolders = {
+                ...this.expandedFolders,
+                [id]: !this.expandedFolders[id]
+            }
+            this._saveSession()
         },
 
         // ─── abort controller (per-conversation) ───

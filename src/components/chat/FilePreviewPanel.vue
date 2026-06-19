@@ -45,9 +45,10 @@
           <img :src="previewUrl" :alt="file?.name" class="fp-image" />
         </div>
 
-        <!-- SVG preview -->
+        <!-- SVG preview — render inline for full interactivity + animation -->
         <div v-else-if="fileCategory === 'svg'" class="fp-svg-wrap">
-          <img :src="previewUrl" :alt="file?.name" class="fp-svg-img" />
+          <div v-if="content" class="fp-svg-inline" v-html="content"></div>
+          <img v-else-if="previewUrl" :src="previewUrl" :alt="file?.name" class="fp-svg-img" />
         </div>
 
         <!-- HTML preview -->
@@ -245,6 +246,20 @@ async function loadFile() {
     // Inline code preview (no URL, code provided directly)
     if (!url && props.file.code) {
       content.value = props.file.code
+      // For SVG: create a blob URL so <img> can render it, or use inline rendering
+      if (cat === 'svg') {
+        _cleanObjectUrl()
+        const svgBlob = new Blob([props.file.code], { type: 'image/svg+xml;charset=utf-8' })
+        _objectUrl = URL.createObjectURL(svgBlob)
+        previewUrl.value = _objectUrl
+        loading.value = false
+        return
+      }
+      // For HTML: render inline in iframe
+      if (cat === 'html') {
+        loading.value = false
+        return
+      }
       highlightLang.value = getHighlightLanguage(props.file.name || '')
       if (window.hljs && highlightLang.value && window.hljs.getLanguage(highlightLang.value)) {
         try {

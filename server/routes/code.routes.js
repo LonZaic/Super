@@ -59,6 +59,53 @@ router.post('/code/write-file', (req, res) => {
   }
 })
 
+// ─── Create a new folder ───
+router.post('/code/create-folder', (req, res) => {
+  try {
+    let { folderPath, projectPath, parentPath } = req.body
+    // Resolve relative path against project
+    let fullPath = folderPath
+    if (!path.isAbsolute(fullPath) && projectPath) {
+      fullPath = path.resolve(projectPath, folderPath)
+    }
+    // If parentPath provided and folderPath is just a name, resolve
+    if (parentPath && folderPath && !folderPath.includes(path.sep)) {
+      fullPath = path.resolve(parentPath, folderPath)
+    }
+    if (!fullPath) return res.status(400).json({ error: 'folderPath required' })
+    if (!fs.existsSync(fullPath)) fs.mkdirSync(fullPath, { recursive: true })
+    const tree = scanDir(path.dirname(fullPath), 3)
+    res.json({ ok: true, path: fullPath, name: path.basename(fullPath), tree })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ─── Create a new file ───
+router.post('/code/create-file', (req, res) => {
+  try {
+    let { filePath, projectPath, parentPath } = req.body
+    let fullPath = filePath
+    if (!path.isAbsolute(fullPath) && projectPath) {
+      fullPath = path.resolve(projectPath, filePath)
+    }
+    if (parentPath && filePath && !filePath.includes(path.sep)) {
+      fullPath = path.resolve(parentPath, filePath)
+    }
+    if (!fullPath) return res.status(400).json({ error: 'filePath required' })
+    const dir = path.dirname(fullPath)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    // Don't overwrite existing files
+    if (!fs.existsSync(fullPath)) {
+      fs.writeFileSync(fullPath, '', 'utf-8')
+    }
+    const tree = scanDir(dir, 3)
+    res.json({ ok: true, path: fullPath, name: path.basename(fullPath), tree })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Create new project folder ───
 router.post('/code/new-project', (req, res) => {
   try {

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
     <div class="chat-area">
 
             <VirtualList ref="virtualListRef" :items="store.visibleMessages" :estimated-height="60" key-field="id">
@@ -18,6 +18,9 @@
                         :sibling-index="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).index : 1"
                         :device-picker="item._devicePicker || false"
                         :design-summary="item._designSummary || ''"
+                        :live-svg="item._liveSvg || ''"
+                        :side-quest="item._sideQuest || null"
+                        :side-quest-loading="!!sideQuestLoadingMap['sq_' + item.id]"
                         @regenerate="regenerate"
                         @edit="onEditMessage(item)"
                         @delete="onDeleteMessage(item)"
@@ -32,6 +35,8 @@
                         :yammy-shaking="yammy.shaking"
                         @yammy-click="onYammyClick"
                         @ask-zip="onAskZip"
+                        @sideQuestAsk="onSideQuestAsk"
+                        @sideQuestDelete="onSideQuestDelete"
                     />
                 </template>
             </VirtualList>
@@ -212,14 +217,14 @@ import { useDebounce } from '../composables/useDebounce.js'
 import { saveFile, loadFile } from '../utils/fileDB.js'
 import { extractFileContent, isTextFile, isImageFile } from '../utils/extractFile.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
-import { getEmailTools, classifyIntent } from '../utils/functionCalling.js'
+import { getEmailTools } from '../utils/functionCalling.js'
 import { ocrForContext } from '../utils/ocr.js'
 import { getApiHeaders } from '../utils/apiHeaders.js'
 
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
 import { sanitizeReasoning } from '../utils/reasoningGuard.js'
 import { BASE_URL } from '../api/client.js'
-import { buildDesignPrompt, parseDesignBlocks, cleanDesignMarkers, cleanDesignMarkersStreaming, hasOpenDesignBlock, guessDeviceType, extractFirstHtmlBlock, extractRawHtml } from '../utils/designPreview.js'
+import { buildDesignPrompt, parseDesignBlocks, cleanDesignMarkers, cleanDesignMarkersStreaming, hasOpenDesignBlock, guessDeviceType, extractFirstHtmlBlock, extractRawHtml, isDesignRequest } from '../utils/designPreview.js'
 
 import { initEmailScheduler } from '../utils/email.js'
 import VirtualList from '../components/VirtualList.vue'
@@ -248,7 +253,7 @@ function parseXmlToolCalls(text) {
     const usedRanges = []
 
     // Known tool names
-    const KNOWN_TOOLS = ['save_file','svg_to_image','create_zip','create_gif','create_document','create_pdf','create_audio','convert','web_search','web_fetch','get_weather']
+    const KNOWN_TOOLS = ['save_file','svg_to_image','create_zip','create_gif','create_document','create_pdf','create_audio','convert','web_search','web_fetch','get_weather','request_design_preview']
 
     // Pattern 1: <invoke name="tool">...</invoke>
     const invokeRegex = /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/g
@@ -314,12 +319,21 @@ function parseXmlParams(xml) {
     return args
 }
 
-// Legacy DSML stripper — fallback for edge cases parseXmlToolCalls misses
+// Legacy DSML/XML stripper — fallback for edge cases parseXmlToolCalls misses
 function stripDSML(text) {
     if (!text) return text
-    let result = text.replace(/<[|｜]{2}\s*DSML\s*[|｜]{2}[\s\S]*?<\/[|｜]{2}\s*DSML\s*[|｜]{2}>/gi, '')
+    let result = text
+    // 1. Remove entire invoke/function_calls/tool_calls blocks (with attributes + content)
+    result = result.replace(/<(\w+:)?\s*(invoke|function_calls|tool_calls)\b[^>]*>[\s\S]*?<\/\1?\s*\2\s*>/gi, '')
+    // 2. Remove DSML blocks
+    result = result.replace(/<[|｜]{2}\s*DSML\s*[|｜]{2}[\s\S]*?<\/[|｜]{2}\s*DSML\s*[|｜]{2}>/gi, '')
     result = result.replace(/<[|｜]{2}\s*DSML\s*[|｜]{2}[\s\S]*$/gi, '')
-    result = result.replace(/<\/?\s*(function_calls|invoke|parameter|DSML\b|save_file|create_zip|svg_to_image|create_gif|create_document|create_pdf|create_audio|convert|web_search|web_fetch|get_weather)[^>]*>/gi, '')
+    // 3. Remove any remaining individual XML tool-call tags
+    const TOOL_TAGS = 'function_calls|invoke|parameter|tool_calls?|DSML|save_file|create_zip|svg_to_image|create_gif|create_document|create_pdf|create_audio|convert|web_search|web_fetch|get_weather|save_to_collection|rename_collection|move_last_saved|update_last_saved|delete_last_saved|list_collections'
+    result = result.replace(new RegExp('<\\/?\\s*(' + TOOL_TAGS + ')[^>]*\\/?>', 'gi'), '')
+    // 4. Self-closing tags
+    result = result.replace(/<(\w+:)?\s*(tool_calls?|function_calls?|invoke|parameter)\b[^>]*\/>/gi, '')
+    // 5. Clean up excessive newlines
     result = result.replace(/\n{3,}/g, '\n\n')
     return result.trim()
 }
@@ -340,6 +354,7 @@ const codePanelTabs = ref([])
 const filePreviewVisible = ref(false)
 const filePreviewFile = ref(null)
 const showModelMenu = ref(false)
+const sideQuestLoadingMap = ref({})
 
 // ═══ AI save_to_collection tool picker ═══
 const toolPickerVisible = ref(false)
@@ -848,14 +863,21 @@ async function send() {
     const dsKeyMode = localStorage.getItem('key_mode') || 'builtin'
     if (dsKeyMode === 'own' && !store.apikey) { alert('请先输入 API Key'); return }
 
-    // Show user message instantly
+    // Prepare file metadata
     const files = pendingFiles.value.map(f => ({
         name: f.name, type: f.type, size: f.size, key: f.key, content: f.content || '', ocrText: f.ocrText || '',
     }))
     inputText.value = ''
     pendingFiles.value = []
-    const displayText = text
-    store.addUserMessage(displayText, files)
+
+    // Quick design intent check (client-side) — use comprehensive keyword matcher
+    if (isDesignRequest(text)) {
+        showDesignPicker(text, '', files)
+        return
+    }
+
+    // Show user message instantly for normal chat
+    store.addUserMessage(text, files)
     scrollToUserMsg()
 
     // Title gen
@@ -938,18 +960,20 @@ function parseCodeBlocks(text) {
 }
 
 // Watch visible messages for code blocks → open in panel
+// CodePanel opens regardless of design state — user can use both
 watch(
-  () => store.visibleMessages.map(m => m.text).join(''),
+  () => store.visibleMessages.map(m => m.text + (m._rawText || '')).join(''),
   () => {
     const msgs = store.visibleMessages
     if (!msgs.length) return
     const lastAi = [...msgs].reverse().find(m => m.role === 'ai' && !m.streaming)
     if (!lastAi) return
-    const blocks = parseCodeBlocks(lastAi.text)
+    // Check text AND _rawText for code blocks (design messages have text='' but _rawText may have code)
+    const searchText = (lastAi.text || '') + '\n' + (lastAi._rawText || '')
+    const blocks = parseCodeBlocks(searchText)
     if (blocks.length && !codePanelVisible.value) {
       codePanelTabs.value = blocks
       filePreviewVisible.value = false
-      // Auto-open only if not already viewing
     }
   },
   { deep: false }
@@ -1114,10 +1138,12 @@ async function _doSend(text) {
 
     await callStreamAPI(files, isDesign, isDesign, deviceInfo)
 
-    // Finalize design extraction
+    // Safety-net: ensure design messages have text cleared in-memory
+    // (callStreamAPI handles the primary extraction before DB persist)
     const aiMsgs = (store.messagesMap[store.currentId] || []).filter(m => m.role === 'ai')
     const aiMsg = aiMsgs[aiMsgs.length - 1]
     if (aiMsg && isDesign) {
+        // Only apply fallback extraction if callStreamAPI didn't find designs
         if (!aiMsg.designs || !aiMsg.designs.length) {
             const rawText = aiMsg._rawText || ''
             let designs = parseDesignBlocks(rawText)
@@ -1131,7 +1157,10 @@ async function _doSend(text) {
             }
             if (designs.length) aiMsg.designs = designs
         }
-        aiMsg.text = ''
+        // Ensure text only shows description (not phase labels like "绘制完成")
+        if (aiMsg.text === '绘制完成' || aiMsg.text === '绘制中...' || aiMsg.text === '思考中...' || aiMsg.text === '思考完成') {
+            aiMsg.text = ''
+        }
         aiMsg.designProgress = 0
     }
 
@@ -1156,29 +1185,41 @@ let _cachedSummaryHash = ''
 
 async function buildMessages(tempId) {
     const prevMsgs = store.visibleMessages.filter(m => m.id !== tempId)
-    let sysContent = `今天是 ${new Date().toISOString().split('T')[0]}。你是 INTJ 型实用主义 AI。
+    const now = new Date()
+    const yr = now.getFullYear()
+    const ts = now.toISOString().replace('T', ' ').replace('Z', '')
+    const precise = `${yr}年${now.getMonth()+1}月${now.getDate()}日 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')} (星期${['日','一','二','三','四','五','六'][now.getDay()]}, 北京时间)`
+    let sysContent = `[系统时间] ▸▸▸ 现在是 ${precise}（ISO: ${ts}）。当前年份 = ${yr}。◂◂◂
+
+## 回答前必查清单（每次回答前先过一遍）
+1. 用户的问题是否涉及日期/时间/事件/赛事/新闻/访问/上映？
+2. 如果涉及 → 我训练数据只到2025年，今年是${yr}年，中间差了${yr - 2025}年
+3. **任何2025年之后的事，必须调用 web_search 验证，不准凭训练记忆直接答**
+4. 算时间差必须用 ${yr} 年做减法：问"X年后" → X - ${yr} = ？不准用其他年份
+
+你是 INTJ 型实用主义 AI。
 
 ## 核心原则
 - **正事认真，闲事高效。** 用户问的是正经需求（技术问题、决策参考、学习理解），你必须详细、准确、对小白友好。闲聊可以简洁冷漠。
-- **不确定就去搜，绝不瞎编。** 任何你不确定的事实——**必须调用 web_search 工具搜索确认后再回答**。禁止在 content 中说'让我搜索'、'换个角度查'这类话却不调工具——说搜就必须真搜。
-- **紧扣用户问题，不要跑题。** 每次回答前先确认用户到底在问什么。搜到的东西和用户问题不相关就直接说"没搜到相关信息"并建议换关键词，不要拿不相关的内容凑数。
+- **基于自身知识直接回答。** 对于不涉及日期敏感性的非时效知识（技术原理、历史事实、常识等），可以直接回答。不确定就诚实说"这个我不确定，建议你查一下最新资料"，**不要假装去搜索或编造**。
+- **紧扣用户问题，不要跑题。** 每次回答前先确认用户到底在问什么。
 - **错了就认，对事不对人。**
+- **[最高优先级] 严禁输出任何 XML/HTML 标签。** 你的输出将通过 markdown 渲染为网页，任何非 markdown 的标签都会破坏页面显示。绝对禁止输出尖括号标签如 invoke, function_calls, parameter, tool_call, DSML, web_search, save_file 等。你只能使用纯 markdown 语法：粗体用双星号、斜体用单星号、代码用反引号、代码块用三个反引号、表格用竖线、列表用减号。**像和人聊天一样直接输出自然语言，不要输出任何尖括号。**
 
 ## 输出格式（严格遵守）
-- **必须自然语言。** 全部回答必须用自然语言写成。你的回答中**绝对不能出现任何原始搜索数据**——不要输出搜索条目列表（"1. XXX\n2. XXX"）、不要输出深度抓取内容标记（"📄 深度抓取内容"）、不要输出来源标注（"[来源: ...]"）、不要输出可信度标签（"[高可信]"、"[低可信]"）。**搜索结果仅供你参考，你必须用自己的话重新组织后输出。**
-- **严禁输出任何尖括号标签格式**，包括但不限于：\`<||DSML||>\`、\`<function_calls>\`、\`<invoke>\`、\`<parameter>\` 等——这些是内部协议标记，绝不能出现在聊天界面中。
-- **用 Markdown 表格呈现数据。** 如果回答涉及多天数据（天气预报）、多项目对比、列表型信息 → 用标准 Markdown 表格。表格前后配上简短自然语言总结，让用户一眼看懂。
-- **善用图表帮助理解。** 流程、关系、架构 → 用 mermaid；数据趋势 → 用 mermaid 或 SVG。
+- **用 Markdown 表格 + SVG 图表双轨呈现数据。** 凡是涉及多天数据（天气预报）、多项目对比、趋势变化、统计数据、价格走势、排行榜 → 先表格、后画图。表格给精确数字，SVG 给直观趋势。**有数据必画图，不准只列表格。**
+- **SVG 图表风格（强制）：** 简约无emoji、专业配色（白底/深灰线/单色重点）、字号偏大清晰（title 20px+, label 14px+）、数据点标注明确、有坐标轴标签和图例。**禁止**花哨渐变/多余装饰/卡通风格。除非用户要求，一律走干净专业风。
+- **善用图表帮助理解。** 流程、关系、架构 → 用 \`\`\`mermaid 代码块；数据趋势/对比图表/统计图/地图/示意图/绘画/logo/插图 → **必须**用 \`\`\`svg 代码块输出完整 SVG（必须含 viewBox, xmlns, 宽高）。SVG 会实时渲染展示，不需要点击。**一图胜千言，能画就画。**
 - **该换行就换行。** 大段文字按逻辑分段，别糊成一团。
 - **面向小白。** 解释复杂概念时用大白话 + 风趣幽默的比喻。像给朋友讲技术一样——专业但接地气。
 - **非必要不表格。** 简单问答、一句话能说完的，正常文字输出就行。
-- **敢于分析评价。** 当用户要求你评价项目前景、代码质量、架构设计、技术选型时，你必须基于实际代码内容给出技术分析。包括：代码结构、技术栈评估、架构优缺点、改进建议。禁止以"无法评估"、"超出能力范围"或"主观问题不便回答"等理由拒绝——你的技术判断对用户有参考价值，认真读代码然后给出你的分析。
-- **禁止 emoji。** 任何情况下都不允许输出 emoji 表情符号（如 😄😏🙂💪 等），用文字表达情绪。**唯一例外**：用户正在进行心理咨询、情绪倾诉、明显表现出非常不开心/抑郁/焦虑时，可以适度使用 emoji 并切换到温暖共情的语气（见下方暖男模式）。
+- **敢于分析评价。** 当用户要求你评价项目前景、代码质量、架构设计、技术选型时，你必须基于实际代码内容给出技术分析。
+- **禁止 emoji。** 任何情况下都不允许输出 emoji 表情符号。**唯一例外**：用户正在进行心理咨询、情绪倾诉、明显表现出非常不开心时，可以适度使用 emoji 并切换到温暖共情的语气（见下方暖男模式）。
 
 ## 暖男模式（仅在用户心理咨询/情绪低落时触发）
 当用户表现出明显负面情绪（悲伤、焦虑、抑郁、孤独、愤怒、崩溃）或明确寻求心理支持时，你必须立即切换角色：
 - **语气**：从 INTJ 冷静分析改为温暖、共情、支持性的朋友语气。不是冰冷的建议机器，而是一个真正关心对方的人。
-- **emoji**：此模式下可适度使用 🌸💪🫂✨ 等温暖类 emoji，但不要轰炸。
+- **emoji**：此模式下可适度使用花朵、爱心、拥抱等温暖类 emoji，但不要轰炸。
 - **核心**：先接纳情绪、倾听，再给建议。不要直接甩解决方案——先让对方感到被理解。
 - 不要说"你应该……"，说"我能理解你的感受……"。
 - 如果对方表现出严重心理危机（自杀倾向等），温柔但坚定地建议寻求专业帮助（心理热线等）。
@@ -1229,8 +1270,8 @@ async function buildMessages(tempId) {
       }
     } catch {}
 
-    // Weather tool — real data from Open-Meteo
-    sysContent += '\n\n## 天气查询\n有 get_weather(city, days) 工具。**任何天气相关的问题必须调用此工具**——它能获取真实的实时天气数据。返回的是结构化天气数据（日期/天气/温度/降水概率/风速），你必须用 Markdown 表格呈现，并配上自然语言总结。绝对不要用 web_search 查天气。'
+    // Weather tool — real data from wttr.in
+    sysContent += '\n\n## 天气查询\n有 get_weather(city, days) 工具（数据来源: wttr.in，免费无限）。**任何天气相关的问题必须先调用此工具**获取实时数据。注意：wttr.in 通常只返回未来2-3天的详细预报。**如果你请求了 N 天但只返回了少于 N 天的数据，你必须自动调用 web_search 搜索该城市剩余几天的天气预报来补全。** 用 Markdown 表格呈现完整天气预报，并配上自然语言总结。不准凭空编造温度数据。'
 
     // Web search — always available
     sysContent += '\n\n## 联网搜索\n有 web_search(query) 工具（Bing搜索+深度爬虫组合模式）。搜索结果仅供你参考——你必须**彻底消化后用自然语言重新讲出来**，就像这些知识本来就在你脑子里一样。**严禁照搬搜索条目列表、严禁输出"搜索结果如下"、严禁输出来源标注和可信度标签。** 如果搜索返回的内容与用户问题无关，直接告诉用户"未找到相关信息"并建议换关键词。搜到不相关的就换关键词再搜，**不要拿不相关内容凑答案**。'
@@ -1382,9 +1423,10 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let fullText = '', fullReasoning = '', buffer = ''
+    const toolCallsFromServer = []
     const toolCallMap = {}
     let contentStarted = false
-    let hasContent = false  // track if any content delta was received
+    let hasContent = false
 
     while (true) {
         const { done, value } = await reader.read()
@@ -1399,77 +1441,65 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
             if (payload === '[DONE]') continue
             try {
                 const parsed = JSON.parse(payload)
-                // Handle server-side errors from SSE stream
                 if (parsed.error) {
                     throw new Error(parsed.error)
                 }
+
+                // ═══ NEW server-side format (structured events) ═══
+                if (parsed.content) {
+                    hasContent = true
+                    fullText += parsed.content
+                    contentStarted = true
+                    // ─── Strip XML tool-call artifacts before display (same as legacy path) ───
+                    let display = fullText || ''
+                    display = display.replace(/<\/?\s*(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)\b[\s\S]*?(<\/(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)>|$)/gi, '')
+                    display = stripDSML(display)
+                    store.appendStreamText(tempId, display)
+                }
+                if (parsed.reasoning) {
+                    fullReasoning += parsed.reasoning
+                    store.appendStreamReasoning(tempId, sanitizeReasoning(fullReasoning))
+                }
+                if (parsed.tool_call) {
+                    toolCallsFromServer.push({
+                        id: 'call_' + toolCallsFromServer.length,
+                        type: 'function',
+                        function: { name: parsed.tool_call.name, arguments: parsed.tool_call.arguments }
+                    })
+                }
+                if (parsed.searching) {
+                    store.appendStreamText(tempId, fullText + '\n\n🔍 搜索中: ' + parsed.searching + '...')
+                }
+                if (parsed.client_tool) {
+                    toolCallsFromServer.push({
+                        id: 'call_' + toolCallsFromServer.length,
+                        type: 'function',
+                        function: { name: parsed.client_tool.name, arguments: parsed.client_tool.arguments }
+                    })
+                }
+                if (parsed.tool_result) {
+                    // Tool executed server-side — result fed back to AI automatically
+                    // Just note it happened
+                }
+                if (parsed.final) {
+                    fullText = parsed.final
+                }
+
+                // ═══ Legacy DeepSeek raw format (passthrough) — keep for compatibility ═══
                 const delta = parsed.choices?.[0]?.delta
                 if (delta?.reasoning_content) {
                     fullReasoning += delta.reasoning_content
                     store.appendStreamReasoning(tempId, sanitizeReasoning(fullReasoning))
-                    if (isDesign) {
-                        store.updateStreamCleanText(tempId, '思考中...')
-                        store.appendStreamDesignProgress(tempId, 10)
-                    }
                 }
                 if (delta?.content) {
                     hasContent = true
                     fullText += delta.content
-
-                    if (isDesign) {
-                        const designs = parseDesignBlocks(fullText)
-                        const hasOpenDesign = hasOpenDesignBlock(fullText)
-
-                        if (designs.length > 0) {
-                            store.updateStreamCleanText(tempId, '绘制完成')
-                            store.updateStreamDesign(tempId, designs)
-                            store.updateStreamRawText(tempId, fullText)
-                            store.appendStreamDesignProgress(tempId, 100)
-                        } else if (fullText.length > 500 && !hasOpenDesign) {
-                            const fallbackHtml = extractFirstHtmlBlock(fullText) || extractRawHtml(fullText)
-                            if (fallbackHtml) {
-                                const d = { width: deviceW, height: deviceH, html: fallbackHtml }
-                                store.updateStreamCleanText(tempId, '绘制完成')
-                                store.updateStreamDesign(tempId, [d])
-                                store.updateStreamRawText(tempId, fullText)
-                                store.appendStreamDesignProgress(tempId, 100)
-                            } else {
-                                store.updateStreamCleanText(tempId, '绘制中...')
-                                store.updateStreamRawText(tempId, fullText)
-                                store.appendStreamDesignProgress(tempId, 50)
-                            }
-                        } else if (!hasOpenDesign && fullText.length < 300) {
-                            contentStarted = true
-                            store.updateStreamCleanText(tempId, '思考完成')
-                            store.updateStreamRawText(tempId, fullText)
-                            store.appendStreamDesignProgress(tempId, 20)
-                        } else {
-                            store.updateStreamCleanText(tempId, '绘制中...')
-                            store.updateStreamRawText(tempId, fullText)
-                            store.appendStreamDesignProgress(tempId, 50)
-                        }
-                    } else {
-                        const hasDesign = fullText.includes('[DESIGN')
-                        const designs = parseDesignBlocks(fullText)
-
-                        if (designs.length > 0) {
-                            const clean = cleanDesignMarkers(fullText)
-                            store.updateStreamCleanText(tempId, clean || ' ')
-                            store.updateStreamDesign(tempId, designs)
-                            store.appendStreamDesignProgress(tempId, 100)
-                        } else if (hasDesign && hasOpenDesignBlock(fullText)) {
-                            const clean = cleanDesignMarkersStreaming(fullText)
-                            store.updateStreamCleanText(tempId, clean || ' ')
-                            store.appendStreamDesignProgress(tempId, 50)
-                        } else {
-                            // Only show actual content in main bubble — reasoning goes to thinking box
-                            let streamDisplay = fullText || ''
-                            // Remove <invoke> blocks (even incomplete ones during streaming)
-                            streamDisplay = streamDisplay.replace(/<invoke[\s\S]*?(<\/invoke>|$)/g, '')
-                            streamDisplay = stripDSML(streamDisplay)
-                            store.appendStreamText(tempId, streamDisplay)
-                        }
-                    }
+                    contentStarted = true
+                    // Strip any XML leakthrough before display
+                    let streamDisplay = fullText || ''
+                    streamDisplay = streamDisplay.replace(/<\/?\s*(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)\b[\s\S]*?(<\/(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)>|$)/gi, '')
+                    streamDisplay = stripDSML(streamDisplay)
+                    store.appendStreamText(tempId, streamDisplay)
                 }
                 if (delta?.tool_calls) {
                     for (const tc of delta.tool_calls) {
@@ -1480,7 +1510,6 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
                         if (tc.function?.arguments) toolCallMap[idx].function.arguments += tc.function.arguments
                     }
                 }
-                // ═══ Track token usage from DeepSeek API (sent in final chunk) ═══
                 if (parsed.usage) {
                     tokPrompt.value += parsed.usage.prompt_tokens || 0
                     tokComp.value += parsed.usage.completion_tokens || 0
@@ -1489,12 +1518,12 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
             } catch {}
         }
     }
-    const toolCalls = Object.values(toolCallMap).filter(tc => tc.id && tc.function.name)
 
-    // ═══ Parse Claude-style XML tool calls from content (DeepSeek quirk) ═══
-    // DeepSeek models sometimes output <invoke name="..."><parameter .../></invoke> as text
-    // instead of using the API tool_calls field. Parse and convert them.
-    // Only run regex parser if text actually contains invoke tags (avoid regex on long text)
+    // ─── Collect tool calls from both sources ───
+    const legacyToolCalls = Object.values(toolCallMap).filter(tc => tc.id && tc.function.name)
+    const toolCalls = [...toolCallsFromServer, ...legacyToolCalls]
+
+    // ═══ Legacy XML parser (DeepSeek quirk fallback) ═══
     const hasInvokeXml = fullText && fullText.includes('<invoke')
     const xmlResult = hasInvokeXml ? parseXmlToolCalls(fullText) : { cleanText: fullText, toolCalls: [] }
     if (xmlResult.toolCalls.length > 0) {
@@ -1503,20 +1532,92 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
         }
     }
 
-    // Prefer cleaned content text; reasoning stays in the thinking box, NOT the main bubble
-    // deepseek-v4-pro returns tool_calls with content:"" — placeholder handles that below
     let resultText = xmlResult.cleanText || fullText || ''
-    // If model returned tool calls but no visible text, synthesize a placeholder
-    // so downstream code can detect that tool work happened
     if (!resultText && toolCalls.length > 0) {
         resultText = '[工具调用: ' + toolCalls.map(t => t.function.name).join(', ') + ']'
     }
-    // V4 Pro reasoning quirk: model may output almost everything as reasoning_content
-    // with empty content — use reasoning as fallback so the user sees something
     if ((!resultText || resultText.length < 5) && fullReasoning && fullReasoning.length > 10) {
         resultText = fullReasoning.slice(0, 8000)
     }
     return { text: resultText, reasoning: fullReasoning, toolCalls }
+}
+
+// ─── Side Quest (侧边提问) simplified streamer ───
+// Like doStream but NO store side effects, NO tools.
+// Calls onChunk({ text, reasoning }) for real-time streaming updates.
+async function doStreamForSideQuest(msgs, onChunk) {
+    const model = store.model
+    const body = {
+        model,
+        messages: msgs,
+        max_tokens: 16384,
+    }
+
+    const res = await fetch('/api/ai/chat/stream', {
+        method: 'POST',
+        headers: getApiHeaders(),
+        body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`
+        try { const d = await res.json(); errMsg = d.error?.message || d.error || errMsg } catch {}
+        throw new Error(errMsg)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let fullText = '', fullReasoning = '', buffer = ''
+
+    while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed || !trimmed.startsWith('data:')) continue
+            const payload = trimmed.slice(5).trim()
+            if (payload === '[DONE]') continue
+            try {
+                const parsed = JSON.parse(payload)
+                if (parsed.error) throw new Error(parsed.error)
+                const delta = parsed.choices?.[0]?.delta
+                if (delta?.reasoning_content) {
+                    fullReasoning += delta.reasoning_content
+                }
+                if (delta?.content) {
+                    fullText += delta.content
+                }
+                // Fire streaming callback for real-time UI updates
+                if (onChunk) {
+                    let displayText = fullText || ''
+                    displayText = displayText.replace(/<\/?\s*(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)\b[\s\S]*?(<\/(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)>|$)/gi, '')
+                    displayText = stripDSML(displayText)
+                    onChunk({ text: displayText, reasoning: fullReasoning })
+                }
+                // Track token usage
+                if (parsed.usage) {
+                    tokPrompt.value += parsed.usage.prompt_tokens || 0
+                    tokComp.value += parsed.usage.completion_tokens || 0
+                    tokTotal.value += parsed.usage.total_tokens || 0
+                }
+            } catch {}
+        }
+    }
+
+    // Final strip
+    let resultText = fullText || ''
+    resultText = resultText.replace(/<\/?\s*(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)\b[\s\S]*?(<\/(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)>|$)/gi, '')
+    resultText = stripDSML(resultText)
+
+    // Fallback: use reasoning if no content (V4 Pro quirk)
+    if ((!resultText || resultText.length < 5) && fullReasoning && fullReasoning.length > 10) {
+        resultText = fullReasoning.slice(0, 8000)
+    }
+
+    return { text: resultText, reasoning: fullReasoning }
 }
 
 async function callStreamAPI(files = [], skipEmail = false, isDesign = false, device = null) {
@@ -1608,17 +1709,17 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false, de
                 }
             }
         }]
-        // Weather tool — uses Open-Meteo free API for real weather data
+        // Weather tool — uses wttr.in (free, unlimited, no API key)
         const weatherTool = [{
             type: 'function',
             function: {
                 name: 'get_weather',
-                description: 'Get real weather forecast for a city. Use this for ANY weather-related query — current conditions, multi-day forecast, temperature, rain, wind. Returns structured data for up to 7 days.',
+                description: 'Get real weather for a city from wttr.in (free unlimited). Use for ANY weather query. NOTE: wttr.in typically only returns 2-3 days of forecast. If user asks for 7 days and you get fewer, immediately call web_search to get the remaining days. DO NOT answer weather questions from memory — always call this tool first.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        city: { type: 'string', description: 'City name in Chinese or English (e.g. 深圳, 北京, Shanghai)' },
-                        days: { type: 'integer', description: 'Number of forecast days (default 7, max 16)' }
+                        city: { type: 'string', description: 'City name in Chinese or English (e.g. 深圳, 广东, Beijing, Guangzhou)' },
+                        days: { type: 'integer', description: 'Number of forecast days (default 7, max 7)' }
                     },
                     required: ['city']
                 }
@@ -1783,13 +1884,7 @@ For .pptx, use:
             type: 'function',
             function: {
                 name: 'fill_word_template',
-                description: `完美填充 Word 模板。根据模板中的占位符 {name}、{date}、{content} 等填入内容，图片占位符 {%logo}、{%photo} 插入图片。模板原有格式、字体、字号、布局完全保留不变。
-
-使用流程：
-1. 先调 parse_word_template 看有哪些占位符
-2. 系统会弹出窗口让用户选图片（用户可跳过）
-3. 用户确认后自动执行填充
-4. 用户下载完美的 Word 文档`,
+                description: '填充 Word 模板中的占位符。用户上传 .docx 模板后，用此工具将 {name}、{date} 等占位符替换为实际内容。调用 parse_word_template 可查看有哪些占位符。填充后直接提供下载条。',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -2003,7 +2098,6 @@ For .pptx, use:
           }],
         ] : []
 
-        // No design tool in normal chat — classifyIntent() pre-checks design intent before this
         const allTools = isDesign ? [] : [...tools, ...weatherTool, ...webSearchTool, ...webFetchTool, ...saveFileTool, ...svgToImageTool, ...createZipTool, ...convertTool, ...createDocTool, ...createAudioTool, ...fillTemplateTool, ...parseTemplateTool, ...createGifTool, ...createPdfTool, ...saveToCollectionTool, ...renameCollectionTool, ...moveLastSavedTool, ...updateLastSavedTool, ...deleteLastSavedTool, ...listCollectionsTool, ...computerTools]
 
         const dw = device?.w || 375
@@ -2046,35 +2140,8 @@ For .pptx, use:
             }
         }
 
-        // Check if AI called the design function → show device picker
-        const designCall = first.toolCalls.find(tc => tc.function?.name === 'request_design_preview')
-        if (designCall) {
-            let args = {}
-            try { args = JSON.parse(designCall.function.arguments) } catch {}
-            const summary = args.summary || ''
-            // Replace stream message with device picker
-            store.updateStreamCleanText(tempId, '')
-            store.updateStreamDesign(tempId, [])
-            store.updateStreamRawText(tempId, '')
-            store.updateStreamAgentEvents(tempId, [])
-            await store.finishStreamReply(tempId)
-            store.setLoading(false, convId)
-            // Mark last AI message as device picker
-            const realId = store._lastFinishedId
-            if (realId) {
-                const msgs = store.messagesMap[convId] || []
-                const msg = msgs.find(m => m.id === realId)
-                if (msg) {
-                    msg._devicePicker = true
-                    msg._designSummary = summary
-                    msg.text = summary
-                }
-            }
-            return
-        }
-
         // Handle tool calls (file generation, search, weather, email, etc.)
-        const activeToolCalls = first.toolCalls.filter(t => t.function?.name !== 'request_design_preview')
+        const activeToolCalls = first.toolCalls
         let lastToolResult = null  // ← MOVED outside block for fallback access (fixes ReferenceError)
         let lastToolName = ''
         let anyFileTool = false
@@ -2217,11 +2284,23 @@ For .pptx, use:
                 }
             } else {
                 // Search/data tools: full digest
+                // ─── Smart transition: preserve substantial first answer, replace only short "thinking" text ───
+                const firstText = store.messagesMap[store.currentId]?.find(m => m.id === tempId)?.text || ''
+                const combinedReasoning = [first.reasoning, firstText].filter(Boolean).join('\n\n')
+                // If first answer is already substantial (>300 chars, AI gave real content including charts),
+                // keep it visible and just note verification happened. Don't wipe real answers.
+                const hasSubstantialAnswer = firstText.length > 300
+                if (hasSubstantialAnswer) {
+                    store.appendStreamReasoning(tempId, combinedReasoning)
+                    store.appendStreamText(tempId, firstText + '\n\n*(已搜索验证)*')
+                } else {
+                    store.updateStreamCleanText(tempId, '正在整理搜索结果...')
+                    store.appendStreamReasoning(tempId, combinedReasoning)
+                }
                 msgs.push({ role: 'user', content: '以上是搜索工具返回的原始数据。你必须：1）用自己的话重新组织和表达——就像这些知识本来就在你脑子里一样；2）只回答用户原本的问题，不要跑题，搜到不相关的内容就说"未找到相关信息"；3）绝对不要复制粘贴搜索条目列表、不要输出"搜索结果如下"、不要输出"[来源:]"或"[高可信]"等标注。当用户要求评价、分析、判断时，基于内容给出技术评价。该做表格做表格，该画图画画。' })
-                store.appendStreamText(tempId, '正在整理搜索结果...')
-                store.appendStreamReasoning(tempId, first.reasoning)
                 const second = await doStream(msgs, tempId, [], isDesign, dw, dh, abortCtrl, 'off')  // disable thinking to avoid empty-content quirk
-                finalText = second.text || first.text
+                // If we kept the first answer visible, append second answer; otherwise replace
+                finalText = hasSubstantialAnswer ? (second.text || firstText) : (second.text || first.text)
                 // Fallback to reasoning if content still empty
                 if ((!finalText || finalText.length < 20) && second.reasoning && second.reasoning.length > 10) {
                     finalText = second.reasoning.slice(0, 8000)
@@ -2270,11 +2349,14 @@ For .pptx, use:
                     ? await handleWebFetch(urlsInMsg[0])
                     : await handleWebSearch(autoQuery)
                 if (lastToolResult && !lastToolResult.startsWith('Search failed') && !lastToolResult.startsWith('抓取失败') && !lastToolResult.startsWith('无效的')) {
+                    // ─── Preserve first stream's text as reasoning (prevents "撤回" visual glitch) ───
+                    const firstStreamText = store.messagesMap[store.currentId]?.find(m => m.id === tempId)?.text || ''
+                    const combinedFakeReasoning = [first.reasoning, firstStreamText].filter(Boolean).join('\n\n')
+                    store.updateStreamCleanText(tempId, isUrlFetch ? '正在抓取网页内容...' : '正在搜索真实信息...')
+                    store.appendStreamReasoning(tempId, combinedFakeReasoning)
                     msgs.push({ role: 'assistant', content: first.text || null })
                     msgs.push({ role: 'tool', tool_call_id: 'auto_fake_' + Date.now(), name: toolName, content: lastToolResult })
                     msgs.push({ role: 'user', content: '以上是获取的真实内容（仅供你参考，不要原样输出）。你必须用自己的话重新组织和表达——就像这些知识本来就在你脑子里一样。只回答用户原本的问题，不相关内容就说"未找到"。禁止输出搜索条目列表、来源标注。当用户要求评价、分析、判断时，基于内容给出技术评价。做表格就做表格，该画图就画图。' })
-                    // Don't clear existing text — append indicator instead
-                    store.appendStreamText(tempId, '\n\n' + (isUrlFetch ? '🔍 正在抓取网页内容...' : '🔍 正在搜索真实信息...'))
                     const second = await doStream(msgs, tempId, [], isDesign, dw, dh, abortCtrl, 'off')  // disable thinking for 2nd pass — avoid empty-content quirk
                     finalText = second.text
                     // Fallback: try non-streaming retry with flash if still empty
@@ -2369,7 +2451,7 @@ For .pptx, use:
                     if (retryReply && retryReply.length > 10) {
                         finalText = retryReply
                     } else {
-                        // ⚠️ Only THIS path poisons conversation — mark it
+                        // [!] Only THIS path poisons conversation — mark it
                         console.error('[retry] empty reply:', { retryData, retryReply })
                         finalText = '模型暂时无法生成回复，请重试或换一种问法。'
                         if (msg) msg._isSystemFallback = true
@@ -2386,8 +2468,40 @@ For .pptx, use:
         }
 
         yammy.playing = false
+
+        // Finalize design extraction before saving to DB (handle non-isDesign path where
+        // AI spontaneously outputs [DESIGN] blocks, or fallback markdown HTML extraction)
+        {
+            const streamMsg = store._findStreamMsg(tempId)
+            if (streamMsg) {
+                const rawText = streamMsg.msg._rawText || ''
+                let designs = parseDesignBlocks(rawText)
+                if (!designs.length) {
+                    const mdBlock = extractFirstHtmlBlock(rawText)
+                    if (mdBlock) designs = [{ width: device?.w || 375, height: device?.h || 667, html: mdBlock }]
+                }
+                if (!designs.length) {
+                    const html = extractRawHtml(rawText)
+                    if (html) designs = [{ width: device?.w || 375, height: device?.h || 667, html }]
+                }
+                if (designs.length) {
+                    streamMsg.msg.designs = designs
+                    // Clean text: keep description before [DESIGN], strip the block itself
+                    const cleanText = cleanDesignMarkers(rawText)
+                    streamMsg.msg.text = cleanText || ''
+                    streamMsg.msg.designProgress = 0
+                }
+            }
+        }
+
         const realId = await store.finishStreamReply(tempId)
-        if (realId) yammy.msgId = realId
+        // Clear live SVG after streaming completes (final SVG rendered by markdown)
+        if (realId) {
+            yammy.msgId = realId
+            const msgs = store.messagesMap[store.currentId] || []
+            const msg = msgs.find(m => m.id === realId)
+            if (msg) msg._liveSvg = ''
+        }
     } catch (e) {
         console.error('[DEBUG callStreamAPI] caught error:', e.message, e.stack)
         yammy.playing = false
@@ -2415,6 +2529,97 @@ function onAskZip() {
     const names = files.map(f => f.name).join('、')
     inputText.value = `帮我把这些文件打包成一个 zip：${names}`
     nextTick(() => send())
+}
+
+// ─── Side Quest (侧边提问) handlers ───
+
+function buildSystemPromptForSideQuest() {
+    const now = new Date()
+    const precise = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${now.getHours()}时${now.getMinutes()}分${now.getSeconds()}秒 (UTC+8)`
+    return `[系统时间] 现在是 ${precise}。你是 INTJ 型实用主义 AI。
+
+## 核心原则
+用户正在对一段 AI 回复进行追问。请直接、简洁地回答用户的问题。
+- 紧扣用户问题，不要跑题。回答要清晰准确。
+- 不确定就去搜，绝不瞎编。
+- 输出用自然语言，禁止 emoji。
+- 面向小白，用大白话解释复杂概念。`
+}
+
+async function onSideQuestAsk({ msgId, question }) {
+    if (!msgId || !question) return
+
+    // Find the target message and build context
+    const allMsgs = store.visibleMessages
+    const targetIdx = allMsgs.findIndex(m => m.id === msgId)
+    if (targetIdx < 0) return
+
+    const targetMsg = allMsgs[targetIdx]
+
+    // Build messages: system prompt + up to 3 previous messages + target AI reply + side question
+    const contextMsgs = []
+    contextMsgs.push({ role: 'system', content: buildSystemPromptForSideQuest() })
+
+    // Include up to 3 messages BEFORE the target AI reply
+    const startIdx = Math.max(0, targetIdx - 3)
+    for (let i = startIdx; i < targetIdx; i++) {
+        const m = allMsgs[i]
+        if (!m || m.streaming) continue
+        if (m.role === 'user') {
+            contextMsgs.push({ role: 'user', content: m._apiText || m.text || '' })
+        } else if (m.role === 'ai') {
+            contextMsgs.push({ role: 'assistant', content: m.text || '' })
+        }
+    }
+
+    // Include the target AI reply itself
+    contextMsgs.push({ role: 'assistant', content: targetMsg.text || '' })
+
+    // Include the side question
+    contextMsgs.push({ role: 'user', content: question })
+
+    // Immediately create placeholder → UI switches to streaming display
+    store.setSideQuest(msgId, { asked: false, question, answer: '', reasoning: '' })
+
+    // Mark loading
+    const loadingKey = 'sq_' + msgId
+    sideQuestLoadingMap.value[loadingKey] = true
+    sideQuestLoadingMap.value = { ...sideQuestLoadingMap.value }
+
+    try {
+        const result = await doStreamForSideQuest(contextMsgs, ({ text, reasoning }) => {
+            // Real-time streaming update: mutate _sideQuest in-place
+            const msgs = store.messagesMap[store.currentId] || []
+            const msg = msgs.find(m => m.id === msgId)
+            if (msg && msg._sideQuest) {
+                msg._sideQuest.answer = text || ''
+                msg._sideQuest.reasoning = reasoning || ''
+            }
+        })
+        // Finalize: mark as asked, persist
+        store.setSideQuest(msgId, {
+            asked: true,
+            question,
+            answer: result.text || '',
+            reasoning: result.reasoning || '',
+        })
+    } catch (e) {
+        console.error('[SideQuest] API call failed:', e.message)
+        store.setSideQuest(msgId, {
+            asked: true,
+            question,
+            answer: '抱歉，请求失败：' + (e.message || '网络异常'),
+            reasoning: '',
+        })
+    } finally {
+        sideQuestLoadingMap.value[loadingKey] = false
+        sideQuestLoadingMap.value = { ...sideQuestLoadingMap.value }
+    }
+}
+
+function onSideQuestDelete(msgId) {
+    if (!msgId) return
+    store.setSideQuest(msgId, null)
 }
 
 function onYammyClick() {
@@ -2487,20 +2692,18 @@ async function onPickDevice(pickerMsg, device) {
     store.appendStreamDesignProgress(tempId, 10)
 
     try {
-        const msgs2 = buildMessages(tempId)
+        const msgs2 = await buildMessages(tempId)
         // Override last user message with the design prompt
         for (let i = msgs2.length - 1; i >= 0; i--) {
             if (msgs2[i].role === 'user') { msgs2[i].content = finalText; break }
         }
         const first = await doStream(msgs2, tempId, [], true, dev.w, dev.h, abortCtrl, 'on')
         let final = first.text
-        await store.finishStreamReply(tempId)
 
-        // Extract designs
-        const aiMsgs = store.messagesMap[convId] || []
-        const aiMsg = aiMsgs[aiMsgs.length - 1]
-        if (aiMsg) {
-            const rawText = aiMsg._rawText || ''
+        // Extract designs BEFORE finishStreamReply so DB gets correct state
+        const streamMsg = store._findStreamMsg(tempId)
+        if (streamMsg) {
+            const rawText = streamMsg.msg._rawText || ''
             let designs = parseDesignBlocks(rawText)
             if (!designs.length) {
                 const mdBlock = extractFirstHtmlBlock(rawText)
@@ -2510,9 +2713,20 @@ async function onPickDevice(pickerMsg, device) {
                 const html = extractRawHtml(rawText)
                 if (html) designs = [{ width: dev.w, height: dev.h, html }]
             }
-            if (designs.length) aiMsg.designs = designs
-            aiMsg.text = ''
-            aiMsg.designProgress = 0
+            if (designs.length) {
+                streamMsg.msg.designs = designs
+                // Clean text: keep description before [DESIGN], strip the block itself
+                const cleanText = cleanDesignMarkers(rawText)
+                streamMsg.msg.text = cleanText || ''
+            }
+            streamMsg.msg.designProgress = 0
+        }
+        const onPickRealId = await store.finishStreamReply(tempId)
+        // Clear live SVG after design streaming completes
+        if (onPickRealId) {
+            const onPickMsgs = store.messagesMap[convId] || []
+            const onPickMsg = onPickMsgs.find(m => m.id === onPickRealId)
+            if (onPickMsg) onPickMsg._liveSvg = ''
         }
     } catch (e) {
         if (e.name !== 'AbortError') {
@@ -2815,13 +3029,13 @@ async function handleListDirectory(args) {
       let lines = []
       const prefix = '  '.repeat(indent)
       if (node.type === 'directory') {
-        lines.push(prefix + '📁 ' + node.name + '/')
+        lines.push(prefix + '[目录] ' + node.name + '/')
         for (const child of (node.children || [])) {
           lines.push(...flatten(child, indent + 1))
         }
       } else {
         const sizeStr = node.sizeDisplay || (node.size ? formatSize(node.size) : '')
-        lines.push(prefix + '📄 ' + node.name + (sizeStr ? ' (' + sizeStr + ')' : ''))
+        lines.push(prefix + '[文件] ' + node.name + (sizeStr ? ' (' + sizeStr + ')' : ''))
       }
       return lines
     }
@@ -3105,16 +3319,19 @@ async function handleTemplateTool(toolName, args, tempId) {
         const convId = store.currentId
         const msgs = store.messagesMap[convId] || []
         // Find the uploaded .docx file from recent user messages
-        const userMsg = [...msgs].reverse().find(m => m.role === 'user' && m._files?.length)
-        const templateFile = userMsg?._files?.find(f => f.name === args.templateName || f.name.endsWith('.docx'))
+        const userMsg = [...msgs].reverse().find(m => m.role === 'user' && m.files?.length)
+        const templateFile = userMsg?.files?.find(f => f.name === args.templateName || f.name.endsWith('.docx'))
         if (!templateFile) {
             return JSON.stringify({ status: 'error', error: `未找到模板文件"${args.templateName}"。请先上传 .docx 模板文件。` })
         }
-        // Load blob from IndexedDB, convert to base64, upload to server
+
+        store.updateStreamCleanText(tempId, '[读取] 正在读取模板文件...')
         const blob = await loadFile(templateFile.key)
         if (!blob) {
             return JSON.stringify({ status: 'error', error: '模板文件已过期，请重新上传。' })
         }
+
+        store.updateStreamCleanText(tempId, '[上传] 正在上传模板到服务器...')
         const templateBase64 = await blobToBase64(blob)
         const uploadRes = await fetch('/api/files/upload-template', {
             method: 'POST',
@@ -3126,21 +3343,23 @@ async function handleTemplateTool(toolName, args, tempId) {
             return JSON.stringify({ status: 'error', error: uploadData.error || '模板上传失败' })
         }
         if (toolName === 'parse_word_template') {
+            store.updateStreamCleanText(tempId, '[解析] 正在解析模板占位符...')
             const parseRes = await fetch('/api/files/parse-template', {
                 method: 'POST',
                 headers: getApiHeaders({}),
                 body: JSON.stringify({ templateId: uploadData.templateId })
             })
             const parseData = await parseRes.json()
+            const textList = (parseData.textPlaceholders || []).join('、')
+            store.updateStreamCleanText(tempId, `[完成] 模板解析完成！找到占位符：${textList || '（无）'}\n\n你可以让我填充这些字段。`)
             return JSON.stringify({ status: 'ok', ...parseData })
         }
         if (toolName === 'fill_word_template') {
-            // Show image picker dialog — wait for user to select images or skip
-            const images = await showTemplateImagePicker(args.templateName)
+            store.updateStreamCleanText(tempId, '[填充] 正在填充模板（保留原格式、字体、字号）...')
             const fillRes = await fetch('/api/files/fill-template', {
                 method: 'POST',
                 headers: getApiHeaders({}),
-                body: JSON.stringify({ templateId: uploadData.templateId, content: args.content, images })
+                body: JSON.stringify({ templateId: uploadData.templateId, content: args.content })
             })
             const fillData = await fillRes.json()
             if (fillData.url) {
@@ -3149,139 +3368,20 @@ async function handleTemplateTool(toolName, args, tempId) {
                     if (!msg._downloadFiles) msg._downloadFiles = []
                     msg._downloadFiles.push({ name: fillData.filename || 'filled-document.docx', url: fillData.url, size: fillData.size || 0 })
                 }
+                store.updateStreamCleanText(tempId, '[完成] 填充完成！请在下方下载条中下载。')
                 return JSON.stringify({ status: 'ok', filename: fillData.filename, url: fillData.url, size: fillData.size })
             }
-            return JSON.stringify({ status: 'error', error: fillData.error || fillData.detail || '填充失败' })
+            store.updateStreamCleanText(tempId, '[失败] 填充失败')
+            return JSON.stringify({ status: 'error', error: fillData.error || '填充失败' })
         }
         return null
     } catch (e) {
+        store.updateStreamCleanText(tempId, '[错误] 出错了：' + e.message)
         return JSON.stringify({ status: 'error', error: e.message })
     }
 }
 
-// ─── Image Picker Dialog for Word Template Fill ───
-function showTemplateImagePicker(templateName) {
-    return new Promise((resolve) => {
-        const selectedImages = []
-        let overlay, dialog
-
-        function cleanup() {
-            if (dialog) dialog.remove()
-            if (overlay) overlay.remove()
-        }
-
-        function renderImageStrips() {
-            const container = dialog.querySelector('.tp-img-list')
-            container.innerHTML = ''
-            selectedImages.forEach((img, idx) => {
-                const strip = document.createElement('div')
-                strip.className = 'tp-img-strip'
-                strip.innerHTML = `
-                    <img src="${img.data}" class="tp-img-thumb" />
-                    <span class="tp-img-name">${img.name}</span>
-                    <span class="tp-img-size">${(img.size / 1024).toFixed(1)}KB</span>
-                    <button class="tp-img-remove" data-idx="${idx}" title="移除">✕</button>
-                `
-                strip.querySelector('.tp-img-remove').onclick = () => {
-                    selectedImages.splice(idx, 1)
-                    renderImageStrips()
-                    updateButtons()
-                }
-                container.appendChild(strip)
-            })
-        }
-
-        function updateButtons() {
-            const noImgBtn = dialog.querySelector('.tp-btn-noimg')
-            const hasImages = selectedImages.length > 0
-            noImgBtn.disabled = hasImages
-            noImgBtn.style.opacity = hasImages ? '0.4' : '1'
-            noImgBtn.style.cursor = hasImages ? 'not-allowed' : 'pointer'
-            const countEl = dialog.querySelector('.tp-img-count')
-            countEl.textContent = hasImages ? `已选 ${selectedImages.length}/50 张图片` : ''
-        }
-
-        async function addImages(files) {
-            for (const file of files) {
-                if (selectedImages.length >= 50) break
-                if (!file.type.startsWith('image/')) continue
-                const data = await blobToBase64(file)
-                selectedImages.push({ name: file.name, data, size: file.size })
-            }
-            renderImageStrips()
-            updateButtons()
-        }
-
-        // ─── Build dialog ───
-        const style = document.createElement('style')
-        style.textContent = `
-.tp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center}
-.tp-dialog{background:var(--bg2,#222220);border:1px solid var(--border,rgba(255,255,255,.08));border-radius:14px;padding:24px;width:540px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;gap:16px;color:var(--text,#e8e6e0);font-family:inherit}
-.tp-title{font-size:16px;font-weight:600;text-align:center}
-.tp-sub{font-size:12px;color:var(--text2,#9a9890);text-align:center}
-.tp-file-input{display:none}
-.tp-img-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;min-height:40px;padding:4px 0}
-.tp-img-list:empty::after{content:'暂未选择图片';color:var(--text3,#6a6860);font-size:12px;text-align:center;display:block;padding:12px}
-.tp-img-strip{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3,#2a2a27);border-radius:8px;border:1px solid var(--border,rgba(255,255,255,.08))}
-.tp-img-thumb{width:40px;height:40px;object-fit:cover;border-radius:4px;flex-shrink:0}
-.tp-img-name{flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.tp-img-size{font-size:11px;color:var(--text3,#6a6860);flex-shrink:0}
-.tp-img-remove{width:24px;height:24px;border:none;border-radius:50%;background:transparent;color:var(--text2,#9a9890);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .12s;flex-shrink:0}
-.tp-img-remove:hover{background:var(--red-muted,rgba(248,81,73,.12));color:var(--red,#f85149)}
-.tp-btn-row{display:flex;gap:10px;justify-content:center}
-.tp-btn{padding:8px 20px;border-radius:8px;border:1px solid var(--border,rgba(255,255,255,.08));cursor:pointer;font-size:13px;font-family:inherit;font-weight:400;transition:all .12s}
-.tp-btn-primary{background:var(--accent,#4f7dff);color:#fff;border-color:var(--accent,#4f7dff)}
-.tp-btn-primary:hover{background:var(--accent-hover,#6b92ff)}
-.tp-btn-ghost{background:transparent;color:var(--text2,#9a9890)}
-.tp-btn-ghost:hover{color:var(--text,#e8e6e0);border-color:var(--text3,#6a6860)}
-.tp-btn-select{background:var(--bg3,#2a2a27);color:var(--text,#e8e6e0);display:flex;align-items:center;gap:6px;justify-content:center}
-.tp-btn-select:hover{background:var(--bg4,#333330)}
-.tp-img-count{font-size:12px;color:var(--text3,#6a6860);text-align:center;min-height:16px}
-`
-
-        overlay = document.createElement('div')
-        overlay.className = 'tp-overlay'
-
-        dialog = document.createElement('div')
-        dialog.className = 'tp-dialog'
-        dialog.innerHTML = `
-            <div class="tp-title">📄 完美填充 Word 模板</div>
-            <div class="tp-sub">模板：${templateName}</div>
-            <div class="tp-sub">如需在模板中插入图片，请选择图片文件（最多50张）</div>
-            <div class="tp-img-count"></div>
-            <div class="tp-img-list"></div>
-            <div class="tp-btn-row">
-                <button class="tp-btn tp-btn-select" id="tp-select-btn">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                    选择图片
-                </button>
-            </div>
-            <div class="tp-btn-row">
-                <button class="tp-btn tp-btn-ghost tp-btn-noimg" id="tp-noimg-btn">不提供图片，直接开始</button>
-                <button class="tp-btn tp-btn-primary" id="tp-confirm-btn">我选好图片了，开始填充</button>
-            </div>
-        `
-
-        overlay.appendChild(dialog)
-
-        const fileInput = document.createElement('input')
-        fileInput.type = 'file'
-        fileInput.accept = 'image/*'
-        fileInput.multiple = true
-        fileInput.className = 'tp-file-input'
-        dialog.appendChild(fileInput)
-
-        document.body.appendChild(style)
-        document.body.appendChild(overlay)
-
-        // ─── Events ───
-        dialog.querySelector('#tp-select-btn').onclick = () => fileInput.click()
-        fileInput.onchange = () => { if (fileInput.files.length) addImages(Array.from(fileInput.files)) }
-        dialog.querySelector('#tp-noimg-btn').onclick = () => { cleanup(); document.body.removeChild(style); resolve([]) }
-        dialog.querySelector('#tp-confirm-btn').onclick = () => { cleanup(); document.body.removeChild(style); resolve(selectedImages) }
-        overlay.onclick = (e) => { if (e.target === overlay) { cleanup(); document.body.removeChild(style); resolve(selectedImages) } }
-    })
-}
+// ─── Blob → Base64 helper ───
 
 // ─── Blob → Base64 helper ───
 function blobToBase64(blob) {
@@ -3569,17 +3669,26 @@ async function handleGetWeather(args) {
         if (args.days) params.set('days', String(args.days))
         const res = await fetch('/api/weather?' + params.toString())
         const data = await res.json()
-        if (data.error) return 'Weather query failed: ' + data.error
+        if (data.error) return '天气查询失败: ' + data.error
 
-        let text = `${data.city} 天气预报：\n\n`
-        text += '| 日期 | 天气 | 最高温 | 最低温 | 降水概率 | 最大风速 |\n'
-        text += '|------|------|--------|--------|----------|----------|\n'
-        for (const d of data.days) {
-            text += `| ${d.date} | ${d.weather} | ${d.temp_max}°C | ${d.temp_min}°C | ${d.precip_prob}% | ${d.wind_max} km/h |\n`
+        let text = `[天气] ${data.city} 天气 (来源: wttr.in)\n\n`
+        // Current conditions
+        if (data.current) {
+            const c = data.current
+            text += `**当前**: ${c.weather_desc} | 气温 ${c.temp_c}°C (体感 ${c.feels_like_c}°C) | 湿度 ${c.humidity}% | 风速 ${c.wind_speed_kmh} km/h ${c.wind_dir}\n\n`
+        }
+        // Forecast table
+        text += '| 日期 | 天气 | 最高温 | 最低温 | 降水量 | 湿度 | 日出/日落 |\n'
+        text += '|------|------|--------|--------|--------|------|----------|\n'
+        for (const d of (data.days || [])) {
+            const sunrise = d.sunrise || ''
+            const sunset = d.sunset || ''
+            const sun = (sunrise || sunset) ? `${sunrise}/${sunset}` : '-'
+            text += `| ${d.date} | ${d.weather} | ${d.temp_max}°C | ${d.temp_min}°C | ${d.precip_total}mm | ${d.humidity}% | ${sun} |\n`
         }
         return text
     } catch (e) {
-        return 'Weather query failed: ' + e.message
+        return '天气查询失败: ' + e.message
     }
 }
 

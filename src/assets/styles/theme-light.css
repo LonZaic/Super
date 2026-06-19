@@ -8,6 +8,8 @@
 
   /* ─── Warm white backgrounds ─── */
   --bg: #faf8f5;
+  --body-bg-gradient: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(61,94,239,0.04) 0%, transparent 60%),
+                      radial-gradient(ellipse 40% 40% at 80% 90%, rgba(61,94,239,0.03) 0%, transparent 50%);
   --bg2: #f3f0eb;
   --bg3: #ebe7e1;
   --bg4: #e0dcd5;
@@ -190,7 +192,80 @@
 [data-theme="light"] .rename-overlay,
 [data-theme="light"] .sp-backdrop,
 [data-theme="light"] .cv-modal-overlay {
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.35) !important;
+}
+
+/* ═══ ChatView overlays — light-mode adaptive backgrounds ═══ */
+[data-theme="light"] .preview-overlay {
+  background: rgba(0, 0, 0, 0.65) !important;
+}
+[data-theme="light"] .tool-picker-overlay,
+[data-theme="light"] .save-confirm-overlay {
+  background: rgba(0, 0, 0, 0.30) !important;
+}
+[data-theme="light"] .danger-confirm-overlay {
+  background: rgba(0, 0, 0, 0.35) !important;
+}
+[data-theme="light"] .ms-overlay {
+  background: rgba(0, 0, 0, 0.35) !important;
+}
+[data-theme="light"] .col-modal-overlay {
+  background: rgba(0, 0, 0, 0.25) !important;
+}
+[data-theme="light"] .model-menu {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10) !important;
+}
+[data-theme="light"] .tool-picker-box,
+[data-theme="light"] .save-confirm-box,
+[data-theme="light"] .danger-confirm-box {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12) !important;
+}
+[data-theme="light"] .cv-modal {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10) !important;
+}
+
+/* ═══ Confirm dialog (dynamic JS-created) — light mode ═══ */
+[data-theme="light"] .cfm-overlay {
+  background: rgba(0, 0, 0, 0.30) !important;
+}
+[data-theme="light"] .cfm-box {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* ═══ SettingsPanel — lighter panel shadow ═══ */
+[data-theme="light"] .sp-panel {
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ═══ Code history popup — lighter shadow ═══ */
+[data-theme="light"] .code-hist-popup {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ═══ Sidebar border — adaptive to light mode ═══ */
+[data-theme="light"] .sidebar {
+  border-right: 1px solid rgba(0, 0, 0, 0.07) !important;
+}
+
+/* ═══ SideQuestBox input/thinking areas — light mode ═══ */
+[data-theme="light"] .side-quest-body .side-quest-textarea {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: var(--text) !important;
+}
+[data-theme="light"] .side-quest-body .side-quest-textarea::placeholder {
+  color: rgba(26, 39, 68, 0.55) !important;
+}
+[data-theme="light"] .side-quest-body .side-quest-thinking-body {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: var(--text2) !important;
+}
+[data-theme="light"] .side-quest-body .side-quest-send {
+  color: #fff !important;
+}
+
+/* ═══ McpServerForm overlay — light mode ═══ */
+[data-theme="light"] .mcp-form-overlay {
+  background: rgba(0, 0, 0, 0.35) !important;
 }
 
 /* ─── HomeView tab hover — use dark-tinted hover ─── */
@@ -232,12 +307,12 @@
 
 /* ─── CodeView model menu ─── */
 [data-theme="light"] .cv-model-menu {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
 }
 
 /* ─── CodeView modal ─── */
 [data-theme="light"] .cv-modal {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12) !important;
 }
 
 /* ─── Agent Progress interrupted state ─── */
@@ -252,34 +327,6 @@
 [data-theme="light"] .ap-err-block {
   background: rgba(209, 36, 47, 0.05);
   border-color: rgba(209, 36, 47, 0.15);
-}
-
-/* ─── Sidebar code history popup shadow ─── */
-[data-theme="light"] .code-hist-popup {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-}
-[data-theme="light"] .code-hist-item.active {
-  background: rgba(61, 94, 239, 0.08);
-}
-
-/* ─── Confirm box shadow ─── */
-[data-theme="light"] .confirm-box {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
-}
-
-/* ─── Lang menu shadow ─── */
-[data-theme="light"] .lang-menu {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-}
-
-/* ─── Rename box shadow ─── */
-[data-theme="light"] .rename-box {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-}
-
-/* ─── Panel box shadow ─── */
-[data-theme="light"] .sp-panel {
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.08);
 }
 
 /* ─── Settings radio card ─── */
@@ -366,4 +413,59 @@
 /* ─── Global error bar — keep red bg, white text ─── */
 [data-theme="light"] #app > div[style*="background:#dc2626"] {
   color: #fff;
+}
+
+/* ═══ SideQuestBox light theme ═══ */
+[data-theme="light"] .side-quest-body {
+  background-color: #e8f2fc;
+  border-color: rgba(0,0,0,0.1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 2px 16px rgba(0,0,0,0.1);
+}
+[data-theme="light"] .side-quest-body .side-quest-q-text {
+  color: rgba(0,0,0,0.7);
+}
+[data-theme="light"] .side-quest-body .side-quest-a {
+  color: rgba(0,0,0,0.85);
+}
+[data-theme="light"] .side-quest-body .side-quest-thinking-head:hover {
+  color: rgba(0,0,0,0.7);
+}
+[data-theme="light"] .side-quest-body .side-quest-thinking-label {
+  color: rgba(0,0,0,0.5);
+}
+[data-theme="light"] .side-quest-body .side-quest-thinking-body {
+  color: rgba(0,0,0,0.6) !important;
+  background: rgba(0,0,0,0.04) !important;
+}
+[data-theme="light"] .side-quest-body .side-quest-thinking-arrow {
+  color: rgba(0,0,0,0.4);
+}
+[data-theme="light"] .side-quest-body .side-quest-streaming-hint {
+  color: rgba(0,0,0,0.4);
+}
+[data-theme="light"] .side-quest-body .side-quest-actions {
+  border-top-color: rgba(0,0,0,0.1);
+}
+[data-theme="light"] .side-quest-body .side-quest-action-btn {
+  border-color: rgba(0,0,0,0.15);
+  background: rgba(0,0,0,0.04);
+  color: rgba(0,0,0,0.5);
+}
+[data-theme="light"] .side-quest-body .side-quest-action-btn:hover {
+  background: rgba(0,0,0,0.08);
+  color: rgba(0,0,0,0.75);
+}
+
+/* Also fix the mosaic layer 2 vertical overlay for light mode */
+[data-theme="light"] .side-quest-body {
+  background-image:
+    repeating-linear-gradient(0deg,
+      #BBDEFB 0px 20px, #90CAF9 20px 40px, #64B5F6 40px 60px,
+      #42A5F5 60px 80px, #2196F3 80px 100px, #1E88E5 100px 120px),
+    repeating-linear-gradient(90deg,
+      rgba(255,255,255,0.18) 0px 20px, rgba(0,0,0,0.04) 20px 40px,
+      rgba(255,255,255,0.10) 40px 60px, rgba(0,0,0,0.06) 60px 80px,
+      rgba(255,255,255,0.12) 80px 100px, rgba(0,0,0,0.04) 100px 120px);
+  background-size: 120px 120px;
+  background-position: 0 0, 0 0;
 }

@@ -262,11 +262,12 @@ function autoResize() { const el = inputRef.value; if (!el) return; el.style.hei
 .ag-topbar { flex-shrink: 0; padding: 0 18px; border-bottom: 1px solid var(--border); background: var(--bg2); }
 .ag-tabs { display: flex; gap: 2px; overflow-x: auto; padding: 4px 0 0; }
 .ag-tabs::-webkit-scrollbar { height: 2px; }
-.ag-tab { display: flex; align-items: center; gap: 6px; padding: 6px 10px 5px; border-radius: 7px 7px 0 0; cursor: pointer; font-size: 12px; font-weight: 300; color: var(--text3); border: 1px solid transparent; border-bottom: none; white-space: nowrap; transition: all .12s; }
+.ag-tab { display: flex; align-items: center; gap: 5px; padding: 6px 10px 5px; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12px; font-weight: 300; color: var(--text3); border: 1px solid transparent; border-bottom: none; white-space: nowrap; transition: all .12s; }
 .ag-tab:hover { background: var(--bg3); color: var(--text2); }
 .ag-tab.active { background: var(--bg); color: var(--text); border-color: var(--border); }
-.ag-tab-title { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-.ag-tab-close { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; border: none; background: transparent; color: var(--text3); cursor: pointer; flex-shrink: 0; }
+.ag-tab-title { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.ag-tab-close { display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 3px; border: none; background: transparent; color: var(--text3); cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity .12s, background .12s, color .12s; }
+.ag-tab:hover .ag-tab-close { opacity: 1; }
 .ag-tab-close:hover { background: var(--bg4); color: var(--red); }
 .ag-chat { flex: 1; overflow-y: auto; min-height: 0; padding: 18px 22px 8px; }
 .ag-chat::-webkit-scrollbar { width: 3px; }

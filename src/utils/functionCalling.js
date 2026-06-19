@@ -120,7 +120,7 @@ async function classifyIntent(userText, apikey, contextMsgs = []) {
         max_tokens: 500,  // reasoning models need extra budget for think+tool_call
         messages,
         tools: [getClassifyTool()],
-        // ⚠️ Use 'auto' instead of forced tool_choice — DeepSeek V4 Flash
+        // [!] Use 'auto' instead of forced tool_choice — DeepSeek V4 Flash
         // "thinking mode" rejects { type: 'function', function: { name: '...' } }
         // with 400: "Thinking mode does not support this tool_choice"
         tool_choice: 'auto',

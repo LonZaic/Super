@@ -199,9 +199,9 @@ watch(() => props.tabs, () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-2) var(--space-3);
+  background: var(--bg2);
   border-bottom: 1px solid var(--border);
-  min-height: 44px;
+  min-height: 36px;
 }
 
 .panel-tabs {
@@ -209,26 +209,34 @@ watch(() => props.tabs, () => {
   gap: 2px;
   overflow-x: auto;
   flex: 1;
+  padding: 4px 8px 0;
+  background: var(--bg2);
 }
+.panel-tabs::-webkit-scrollbar { height: 2px; }
 
 .panel-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
+  gap: 5px;
+  padding: 6px 10px 5px;
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--text3);
+  border: 1px solid transparent;
+  border-bottom: none;
   white-space: nowrap;
-  transition: all var(--transition-fast);
+  cursor: pointer;
+  transition: all 0.12s;
 }
 .panel-tab:hover {
-  color: var(--text-secondary);
-  background: var(--bg-hover);
+  background: var(--bg3);
+  color: var(--text2);
 }
 .panel-tab.active {
-  color: var(--text-primary);
-  background: var(--bg-active);
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .tab-lang {
@@ -245,7 +253,7 @@ watch(() => props.tabs, () => {
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
-  margin-left: var(--space-2);
+  padding: 0 6px;
 }
 
 .panel-action-btn {

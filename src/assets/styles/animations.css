@@ -150,6 +150,28 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ══════════════════════════════════════
+   SVG Stroke Animation — "一笔一笔画"
+   ══════════════════════════════════════ */
+
+/* SVG render wraps get a fade-in entrance */
+.svg-render-wrap {
+  animation: svgWrapIn 0.4s ease both;
+}
+@keyframes svgWrapIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* SVG chart wraps — slightly larger entrance */
+.svg-chart-wrap {
+  animation: svgChartIn 0.5s ease both;
+}
+@keyframes svgChartIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* ─── Reduced motion ─── */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -159,4 +181,5 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* SVGs still visible but without stroke animation */
 }

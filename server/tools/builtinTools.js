@@ -261,16 +261,16 @@ async function getWeather(args) {
     const current = data.current
     const currentWeather = wmoCodes[current.weather_code] || `码 ${current.weather_code}`
 
-    let result = `📍 ${data.timezone}\n`
-    result += `🌡️ 当前 ${current.temperature_2m}°C (体感 ${current.apparent_temperature}°C)\n`
-    result += `💧 湿度 ${current.relative_humidity_2m}% | 💨 风速 ${current.wind_speed_10m}km/h\n`
-    result += `🌤️ ${currentWeather}\n\n`
+    let result = `[时区] ${data.timezone}\n`
+    result += `[温度] 当前 ${current.temperature_2m}°C (体感 ${current.apparent_temperature}°C)\n`
+    result += `[湿度] 湿度 ${current.relative_humidity_2m}% | [风速] 风速 ${current.wind_speed_10m}km/h\n`
+    result += `[天气] ${currentWeather}\n\n`
 
     if (data.daily) {
-      result += '📅 预报:\n'
+      result += '[预报] 预报:\n'
       for (let i = 0; i < data.daily.time.length; i++) {
         const w = wmoCodes[data.daily.weather_code[i]] || `码 ${data.daily.weather_code[i]}`
-        result += `  ${data.daily.time[i]}: ${data.daily.temperature_2m_min[i]}~${data.daily.temperature_2m_max[i]}°C ${w} 💧${data.daily.precipitation_sum[i] || 0}mm\n`
+        result += `  ${data.daily.time[i]}: ${data.daily.temperature_2m_min[i]}~${data.daily.temperature_2m_max[i]}°C ${w} [湿度]${data.daily.precipitation_sum[i] || 0}mm\n`
       }
     }
 
@@ -360,7 +360,7 @@ async function githubTool(args) {
         const data = await res.json()
         if (!data.items?.length) return `未找到匹配仓库: ${q}`
         return data.items.map(r =>
-          `• ${r.full_name} ⭐${r.stargazers_count} ${r.description || ''}`
+          `• ${r.full_name} [星标]${r.stargazers_count} ${r.description || ''}`
         ).join('\n')
       }
 
@@ -369,7 +369,7 @@ async function githubTool(args) {
         const res = await fetch(`${api}/repos/${args.repo}`, { headers })
         if (!res.ok) return `仓库不存在或无权访问: ${args.repo}`
         const r = await res.json()
-        return `📦 ${r.full_name}\n⭐ ${r.stargazers_count} | 🍴 ${r.forks_count} | 🐛 ${r.open_issues_count}\n📝 ${r.description || '无描述'}\n🔗 ${r.html_url}\n📅 创建: ${r.created_at?.slice(0, 10)} 更新: ${r.updated_at?.slice(0, 10)}`
+        return `[仓库] ${r.full_name}\n[星标] ${r.stargazers_count} | [Fork] ${r.forks_count} | [Issue] ${r.open_issues_count}\n[描述] ${r.description || '无描述'}\n[链接] ${r.html_url}\n[预报] 创建: ${r.created_at?.slice(0, 10)} 更新: ${r.updated_at?.slice(0, 10)}`
       }
 
       case 'list_issues': {
@@ -410,7 +410,7 @@ async function githubTool(args) {
         const res = await fetch(`${api}/repos/${args.repo}/pulls/${number}`, { headers })
         if (!res.ok) return `PR 不存在: ${number}`
         const pr = await res.json()
-        return `📦 PR #${pr.number}: ${pr.title}\n状态: ${pr.state}\n作者: @${pr.user?.login}\n分支: ${pr.head.ref} → ${pr.base.ref}\n🔗 ${pr.html_url}`
+        return `[仓库] PR #${pr.number}: ${pr.title}\n状态: ${pr.state}\n作者: @${pr.user?.login}\n分支: ${pr.head.ref} → ${pr.base.ref}\n[链接] ${pr.html_url}`
       }
 
       case 'list_files': {
@@ -419,7 +419,7 @@ async function githubTool(args) {
         if (!res.ok) return `无法获取文件列表: ${res.status}`
         const files = await res.json()
         if (!Array.isArray(files)) return '路径不是目录'
-        return files.map(f => `${f.type === 'dir' ? '📁' : '📄'} ${f.name}`).join('\n')
+        return files.map(f => `${f.type === 'dir' ? '[目录]' : '[文件]'} ${f.name}`).join('\n')
       }
 
       default: return `未知操作: ${args.action}，支持: search_repos, get_repo, list_issues, create_issue, list_prs, get_pr, list_files`
@@ -464,7 +464,7 @@ async function notionTool(args) {
         if (!res.ok) return `页面不存在: ${res.status}`
         const page = await res.json()
         const title = page.properties?.title?.title?.[0]?.plain_text || page.properties?.Name?.title?.[0]?.plain_text || '(无标题)'
-        return `📄 ${title}\nID: ${page.id}\nURL: https://notion.so/${page.id.replace(/-/g, '')}`
+        return `[文件] ${title}\nID: ${page.id}\nURL: https://notion.so/${page.id.replace(/-/g, '')}`
       }
 
       case 'create_page': {
@@ -602,7 +602,7 @@ async function dockerTool(args) {
         const data = JSON.parse(out)
         const c = data[0]
         return [
-          `📦 ${c.Name?.replace(/^\//, '')}`,
+          `[仓库] ${c.Name?.replace(/^\//, '')}`,
           `状态: ${c.State?.Status}`,
           `镜像: ${c.Config?.Image}`,
           `创建: ${c.Created?.slice(0, 19)}`,
@@ -642,7 +642,7 @@ async function amapTool(args) {
         const data = await res.json()
         if (data.status !== '1' || !data.geocodes?.length) return `地理编码失败: ${data.info || '无结果'}`
         const g = data.geocodes[0]
-        return `📍 ${g.formatted_address || args.address}\n坐标: ${g.location}\n级别: ${g.level || '未知'}\n城市: ${g.city || ''} ${g.district || ''}`
+        return `[时区] ${g.formatted_address || args.address}\n坐标: ${g.location}\n级别: ${g.level || '未知'}\n城市: ${g.city || ''} ${g.district || ''}`
       }
 
       case 'regeo': {
@@ -655,7 +655,7 @@ async function amapTool(args) {
         const r = data.regeocode
         const addr = r.formatted_address || '无地址'
         const ad = r.addressComponent || {}
-        return `📍 ${addr}\n坐标: ${args.location}\n省: ${ad.province || ''} 市: ${ad.city || ''} 区: ${ad.district || ''}\n街道: ${ad.streetNumber?.street || ''} ${ad.streetNumber?.number || ''}`
+        return `[时区] ${addr}\n坐标: ${args.location}\n省: ${ad.province || ''} 市: ${ad.city || ''} 区: ${ad.district || ''}\n街道: ${ad.streetNumber?.street || ''} ${ad.streetNumber?.number || ''}`
       }
 
       case 'poi': {
@@ -691,7 +691,7 @@ async function amapTool(args) {
           if (!trans) return '无公交方案'
           const cost = trans.cost || {}
           const duration = trans.duration || 0
-          return `🚌 公交方案\n距离: ${(trans.distance / 1000).toFixed(1)}km\n时间: ${Math.round(duration / 60)} 分钟\n费用: ${cost.duration ? cost.duration + '元' : '未知'}\n步行: ${(trans.walking_distance / 1000).toFixed(2)}km`
+          return `[公交] 公交方案\n距离: ${(trans.distance / 1000).toFixed(1)}km\n时间: ${Math.round(duration / 60)} 分钟\n费用: ${cost.duration ? cost.duration + '元' : '未知'}\n步行: ${(trans.walking_distance / 1000).toFixed(2)}km`
         }
 
         const path = data.route.paths?.[0]
@@ -699,7 +699,7 @@ async function amapTool(args) {
         const distKm = (path.distance / 1000).toFixed(1)
         const mins = Math.round(path.duration / 60)
         const tolls = path.tolls || '0'
-        return `${type === 'driving' ? '🚗' : '🚶'} ${type === 'driving' ? '驾车' : '步行'}方案\n距离: ${distKm}km\n预计时间: ${mins} 分钟${type === 'driving' ? '\n路费: ' + tolls + '元' : ''}`
+        return `${type === 'driving' ? '[驾车]' : '[步行]'} ${type === 'driving' ? '驾车' : '步行'}方案\n距离: ${distKm}km\n预计时间: ${mins} 分钟${type === 'driving' ? '\n路费: ' + tolls + '元' : ''}`
       }
 
       case 'distance': {
@@ -711,7 +711,7 @@ async function amapTool(args) {
         const data = await res.json()
         if (data.status !== '1' || !data.results?.length) return `距离测量失败: ${data.info || '无结果'}`
         const r = data.results[0]
-        return `📏 直线距离: ${(r.distance / 1000).toFixed(2)}km\n驾车距离: ${(r.driving_distance / 1000).toFixed(2)}km`
+        return `[距离] 直线距离: ${(r.distance / 1000).toFixed(2)}km\n驾车距离: ${(r.driving_distance / 1000).toFixed(2)}km`
       }
 
       default: return `未知操作: ${args.action}，支持: geocode, regeo, poi, route, distance`

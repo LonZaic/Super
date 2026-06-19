@@ -110,58 +110,161 @@ async function chat(req, res) {
   }
 }
 
-// ─── Helper: stream response from DeepSeek (passthrough mode) ───
-async function streamFromDeepSeek(messages, model, tools, apiKey, rest, res) {
-  const body = {
-    model: model || 'deepseek-v4-flash',
-    messages,
-    stream: true,
-    ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {}),
-    ...(rest.max_tokens ? { max_tokens: rest.max_tokens } : {}),
-    ...(rest.temperature != null ? { temperature: rest.temperature } : {}),
-  }
-  if (rest.thinking) body.thinking = rest.thinking
+// ─── Helper: accumulate streaming tool_calls from DeepSeek SSE chunks ───
+// Industry best practice: parse tool_calls deltas from SSE, execute tools server-side,
+// send only clean content + structured tool_call events to the client.
+async function streamWithToolHandling(messages, model, providedTools, apiKey, rest, res) {
+  const MAX_ROUNDS = 5
+  let currentMessages = [...messages]
+  // Merge server search tool with client-provided tools
+  const allTools = providedTools?.length ? providedTools : [SEARCH_TOOL]
 
-  const dsRes = await fetch(DEEPSEEK_API_BASE, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + apiKey,
-    },
-    body: JSON.stringify(body),
-  })
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const isLastRound = round === MAX_ROUNDS - 1
+    const body = {
+      model: model || 'deepseek-v4-flash',
+      messages: currentMessages,
+      stream: true,
+      tools: allTools,
+      tool_choice: isLastRound ? 'none' : 'auto',
+      ...(rest.max_tokens ? { max_tokens: rest.max_tokens } : {}),
+      ...(rest.temperature != null ? { temperature: rest.temperature } : {}),
+    }
+    if (rest.thinking) body.thinking = rest.thinking
 
-  if (!dsRes.ok) {
-    const err = await dsRes.text()
-    console.error('[AI Stream] DeepSeek error:', dsRes.status, err.slice(0, 500))
-    res.write(`data: ${JSON.stringify({ error: 'API error ' + dsRes.status })}\n\n`)
-    res.end()
-    return
-  }
+    const dsRes = await fetch(DEEPSEEK_API_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify(body),
+    })
 
-  // Pipe SSE chunks from DeepSeek directly to client
-  const reader = dsRes.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
+    if (!dsRes.ok) {
+      const err = await dsRes.text()
+      console.error('[AI Stream] DeepSeek error:', dsRes.status, err.slice(0, 500))
+      res.write(`data: ${JSON.stringify({ error: 'API error ' + dsRes.status })}\n\n`)
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
+    }
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        res.write(trimmed + '\n\n')
+    // ─── Parse SSE, accumulate content + tool_calls deltas ───
+    const reader = dsRes.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let contentText = ''
+    let reasoningText = ''
+    const toolCallAccum = {}  // { index: { id, name, arguments } }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith('data:')) continue
+          const payload = trimmed.slice(5).trim()
+          if (payload === '[DONE]') continue
+          try {
+            const parsed = JSON.parse(payload)
+            const delta = parsed.choices?.[0]?.delta
+            if (!delta) continue
+
+            // Accumulate content delta
+            if (delta.content) {
+              contentText += delta.content
+              res.write(`data: ${JSON.stringify({ content: delta.content })}\n\n`)
+            }
+            // Accumulate reasoning delta
+            if (delta.reasoning_content) {
+              reasoningText += delta.reasoning_content
+              res.write(`data: ${JSON.stringify({ reasoning: delta.reasoning_content })}\n\n`)
+            }
+            // Accumulate tool_call deltas (structured, NOT in content!)
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0
+                if (!toolCallAccum[idx]) toolCallAccum[idx] = { id: '', name: '', arguments: '' }
+                if (tc.id) toolCallAccum[idx].id = tc.id
+                if (tc.function?.name) toolCallAccum[idx].name = tc.function.name
+                if (tc.function?.arguments) toolCallAccum[idx].arguments += tc.function.arguments
+              }
+            }
+
+            const finishReason = parsed.choices?.[0]?.finish_reason
+            if (finishReason === 'tool_calls' || finishReason === 'stop') {
+              // Stream done for this round
+            }
+          } catch { /* skip parse errors on partial chunks */ }
+        }
       }
+      if (buffer.trim() && buffer.trim().startsWith('data:')) {
+        // Process remaining buffer
+      }
+    } catch (e) {
+      res.write(`data: ${JSON.stringify({ error: 'Stream interrupted: ' + e.message })}\n\n`)
     }
-    if (buffer.trim()) {
-      res.write(buffer.trim() + '\n\n')
+
+    // ─── Process accumulated result ───
+    const toolCalls = Object.values(toolCallAccum).filter(tc => tc.name)
+    if (toolCalls.length === 0) {
+      // No tool calls — done! Send the full accumulated text as final
+      res.write(`data: ${JSON.stringify({ final: contentText })}\n\n`)
+      res.write('data: [DONE]\n\n')
+      res.end()
+      return
     }
-  } catch (e) {
-    res.write(`data: ${JSON.stringify({ error: 'Stream interrupted: ' + e.message })}\n\n`)
+
+    // ─── Send tool_call event to client so it knows what's happening ───
+    for (const tc of toolCalls) {
+      res.write(`data: ${JSON.stringify({ tool_call: { name: tc.name, arguments: tc.arguments } })}\n\n`)
+    }
+
+    // ─── Execute tools server-side ───
+    currentMessages.push({
+      role: 'assistant',
+      content: contentText || null,
+      tool_calls: toolCalls.map((tc, i) => ({
+        id: tc.id || ('call_' + i),
+        type: 'function',
+        function: { name: tc.name, arguments: tc.arguments }
+      }))
+    })
+
+    for (const tc of toolCalls) {
+      let result = ''
+      if (tc.name === 'web_search' || tc.name === 'web_fetch') {
+        let args = {}
+        try { args = JSON.parse(tc.arguments || '{}') } catch {}
+        const query = args.query || args.url || ''
+        if (query) {
+          res.write(`data: ${JSON.stringify({ searching: query })}\n\n`)
+          result = await webSearchVerified(query, 5)
+        } else {
+          result = 'No search query provided'
+        }
+      } else {
+        // For other tools (file gen, weather, etc.), tell client to handle locally
+        res.write(`data: ${JSON.stringify({ client_tool: { name: tc.name, arguments: tc.arguments } })}\n\n`)
+        // Client handles these — we're done for now
+        res.write('data: [DONE]\n\n')
+        res.end()
+        return
+      }
+      currentMessages.push({
+        role: 'tool',
+        tool_call_id: tc.id || ('call_' + Object.keys(toolCallAccum).indexOf(tc.id?.toString() || '0')),
+        content: result
+      })
+      // Send tool result to client
+      res.write(`data: ${JSON.stringify({ tool_result: { query: tc.arguments, result } })}\n\n`)
+    }
+    // Loop back for next round — AI will process tool results and may call more tools or give final answer
   }
 
   res.write('data: [DONE]\n\n')
@@ -183,9 +286,7 @@ async function chatStream(req, res) {
   res.flushHeaders()
 
   try {
-    // Passthrough mode: stream directly to DeepSeek with client's tools.
-    // The client handles tool execution — server just proxies.
-    await streamFromDeepSeek(messages, model, tools, apiKey, rest, res)
+    await streamWithToolHandling(messages, model, tools, apiKey, rest, res)
   } catch (e) {
     res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`)
     res.end()

@@ -8,11 +8,13 @@ const createApp = require('./app')
 const config = require('./config')
 const logger = require('./config/logger')
 const { user } = require('./db')
+const { ensureLocalUser } = require('./auth')
 const { ensureMemDir, MEMORY_DIR } = require('./engine/memory')
 const { setupWebSocket } = require('./ws')
 
-// Ensure memory directory on startup
+// Ensure memory directory and local user on startup
 ensureMemDir(MEMORY_DIR)
+ensureLocalUser()
 
 // Create Express app
 const app = createApp()

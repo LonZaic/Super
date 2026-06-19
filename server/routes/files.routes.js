@@ -469,67 +469,42 @@ router.post('/files/parse-template', async (req, res) => {
   }
 })
 
-// Fill a template with content and images
+// Fill a template — simple text replacement (no external libs, no watermark)
 router.post('/files/fill-template', async (req, res) => {
   try {
-    const { templateId, content, images } = req.body
+    const { templateId, content } = req.body
     if (!templateId) return res.status(400).json({ error: 'Missing templateId' })
     const filePath = path.join(TEMPLATES_DIR, safeFilename(templateId))
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Template not found or expired. Please re-upload.' })
+      return res.status(404).json({ error: '模板文件未找到或已过期，请重新上传。' })
     }
     const PizZip = require('pizzip')
-    const Docxtemplater = require('docxtemplater')
-    const ImageModule = require('docxtemplater-image-module-free')
 
     const templateBytes = fs.readFileSync(filePath)
     const zip = new PizZip(templateBytes)
 
-    // Pre-process: convert {image:xxx} placeholders in XML to {%xxx} for docxtemplater
     let docXml = zip.file('word/document.xml')?.asText() || ''
-    const inlineImgRegex = /\{image:([a-zA-Z_一-鿿][a-zA-Z0-9_一-鿿]*)\}/g
-    let hasInlineImages = false
-    docXml = docXml.replace(inlineImgRegex, (match, name) => {
-      hasInlineImages = true
-      return `{%${name}}`
-    })
-    if (hasInlineImages) {
-      zip.file('word/document.xml', docXml)
+    if (!docXml) {
+      return res.status(400).json({ error: '无法读取 Word 文档内容' })
     }
 
-    const imageList = images || []
-    const imageOpts = {
-      centered: false,
-      getImage(tagValue) {
-        const img = imageList.find(i => i.name === tagValue)
-        if (!img || !img.data) {
-          return Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
-        }
-        return Buffer.from(img.data.replace(/^data:image\/\w+;base64,/, ''), 'base64')
-      },
-      getSize() { return [400, 300] }
+    // Simple text replacement: replace all {key} with XML-escaped values
+    const fillData = content || {}
+    for (const [key, val] of Object.entries(fillData)) {
+      const placeholder = `{${key}}`
+      const escaped = String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+      // Replace in the entire XML (finds placeholders inside <w:t> tags)
+      docXml = docXml.split(placeholder).join(escaped)
     }
 
-    const doc = new Docxtemplater(zip, {
-      paragraphLoop: true,
-      linebreaks: true,
-      modules: [new ImageModule(imageOpts)]
-    })
+    zip.file('word/document.xml', docXml)
 
-    doc.setData(content || {})
-    try {
-      doc.render()
-    } catch (renderErr) {
-      return res.status(400).json({
-        status: 'error',
-        error: 'Template fill failed',
-        detail: renderErr.message,
-        hint: '请检查占位符名称是否与模板完全一致，或是否有缺失的字段。'
-      })
-    }
-
-    const outputBuf = doc.getZip().generate({ type: 'nodebuffer', compression: 'DEFLATE' })
-    const outputName = (content?.filename || 'filled-document').replace(/\.docx$/i, '') + '.docx'
+    const outputBuf = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' })
+    const outputName = 'filled-document.docx'
     const safeName = safeFilename(outputName)
     const id = crypto.randomBytes(8).toString('hex')
     const storedName = `${id}_${safeName}`

@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════
+﻿// ═══════════════════════════════════════════
 // Professional Content Crawler v3
 //
 // Features:
@@ -150,7 +150,7 @@ async function crawlGitHubRepo(repoUrl, match) {
       return await crawlGitHubRepoHTML(repoUrl, owner, repo, branch, subPath)
     }
 
-    let content = `📦 GitHub: ${info.full_name}\n`
+    let content = `[归档] GitHub: ${info.full_name}\n`
     content += `   描述: ${info.description || '无'}\n`
     content += `   ⭐ ${info.stargazers_count} | Fork ${info.forks_count} | 语言: ${info.language || '未知'}\n`
     content += `   主题: ${(info.topics || []).join(', ') || '无'}\n`
@@ -173,7 +173,7 @@ async function crawlGitHubRepo(repoUrl, match) {
         const maxShow = 80
         const truncated = entries.length > maxShow
         const shown = entries.slice(0, maxShow)
-        const fileList = shown.map(f => `${f.type === 'tree' ? '📁' : '📄'} ${f.path}`).join('\n   ')
+        const fileList = shown.map(f => `${f.type === 'tree' ? '[目录]' : '[文件]'} ${f.path}`).join('\n   ')
         content += `\n   文件结构 (${entries.length} 个):\n   ${fileList}`
         if (truncated) content += `\n   ... 共 ${entries.length} 个文件/目录`
       }
@@ -183,7 +183,7 @@ async function crawlGitHubRepo(repoUrl, match) {
     try {
       const readmeRaw = await fetchPage(`https://raw.githubusercontent.com/${owner}/${repo}/${branch}/README.md`)
       if (readmeRaw && readmeRaw.length > 50) {
-        content += `\n\n📖 README:\n${readmeRaw.slice(0, 4000)}`
+        content += `\n\n[README] README:\n${readmeRaw.slice(0, 4000)}`
       }
     } catch { /* no readme */ }
 
@@ -203,7 +203,7 @@ async function crawlGitHubRepoHTML(repoUrl, owner, repo, branch, subPath) {
         !/<span[^>]*itemprop="programmingLanguage"/i.test(html)) {
       return {
         url: repoUrl,
-        content: `📦 GitHub: ${owner}/${repo}\n   ⚠️ 该仓库不存在或为私有仓库，无法访问。\n   请检查仓库名是否正确，或确认仓库是否为公开。`
+        content: `[归档] GitHub: ${owner}/${repo}\n   [!] 该仓库不存在或为私有仓库，无法访问。\n   请检查仓库名是否正确，或确认仓库是否为公开。`
       }
     }
 
@@ -216,7 +216,7 @@ async function crawlGitHubRepoHTML(repoUrl, owner, repo, branch, subPath) {
     const starsMatch = html.match(/(\d[\d,]*)\s*stars/i) || html.match(/aria-label="(\d[\d,]*) users starred/i)
     const forksMatch = html.match(/(\d[\d,]*)\s*forks/i)
 
-    let content = `📦 GitHub: ${owner}/${repo}\n`
+    let content = `[归档] GitHub: ${owner}/${repo}\n`
     if (description) content += `   描述: ${description}\n`
     if (langMatch) content += `   语言: ${langMatch[1].trim()}\n`
     if (starsMatch) content += `   ⭐ ${starsMatch[1]}`
@@ -227,7 +227,7 @@ async function crawlGitHubRepoHTML(repoUrl, owner, repo, branch, subPath) {
     // Extract file list from HTML
     const fileEntries = extractFileTreeFromHTML(html)
     if (fileEntries.length > 0) {
-      const fileList = fileEntries.map(f => `${f.type === 'tree' ? '📁' : '📄'} ${f.name}`).join('\n   ')
+      const fileList = fileEntries.map(f => `${f.type === 'tree' ? '[目录]' : '[文件]'} ${f.name}`).join('\n   ')
       content += `\n   文件结构 (${fileEntries.length} 个):\n   ${fileList}`
     }
 
@@ -235,7 +235,7 @@ async function crawlGitHubRepoHTML(repoUrl, owner, repo, branch, subPath) {
     try {
       const readmeRaw = await fetchPage(`https://raw.githubusercontent.com/${owner}/${repo}/${branch}/README.md`)
       if (readmeRaw && readmeRaw.length > 50) {
-        content += `\n\n📖 README:\n${readmeRaw.slice(0, 4000)}`
+        content += `\n\n[README] README:\n${readmeRaw.slice(0, 4000)}`
       }
     } catch {}
 
@@ -260,7 +260,7 @@ async function crawlGitHubFile(blobUrl, match) {
     const capped = code.length > CODE_MAX_LEN ? code.slice(0, CODE_MAX_LEN) + '\n\n// ... 文件过长，已截断' : code
     return {
       url: blobUrl,
-      content: `💻 ${path}\n\`\`\`${ext}\n${capped}\n\`\`\``
+      content: `[代码] ${path}\n\`\`\`${ext}\n${capped}\n\`\`\``
     }
   } catch { return null }
 }
@@ -269,7 +269,7 @@ async function crawlGist(gistUrl, match) {
   try {
     const gistData = await fetchJSON(`https://api.github.com/gists/${match[1]}`)
     if (!gistData || !gistData.files) return null
-    let content = `📋 GitHub Gist: ${gistData.description || '无描述'}\n`
+    let content = `[列表] GitHub Gist: ${gistData.description || '无描述'}\n`
     for (const [fn, file] of Object.entries(gistData.files || {})) {
       const code = (file.content || '').slice(0, 6000)
       const lang = (file.language || '').toLowerCase()
@@ -297,7 +297,7 @@ async function crawlGiteeRepo(repoUrl, match) {
       return await crawlGiteeRepoHTML(repoUrl, owner, repo, branch, subPath)
     }
 
-    let content = `📦 Gitee: ${info.full_name}\n`
+    let content = `[归档] Gitee: ${info.full_name}\n`
     content += `   描述: ${info.description || '无'}\n`
     content += `   ⭐ ${info.stargazers_count} | Fork ${info.forks_count} | 语言: ${info.language || '未知'}\n`
     content += `   地址: ${info.html_url}\n`
@@ -316,7 +316,7 @@ async function crawlGiteeRepo(repoUrl, match) {
         const maxShow = 60
         const truncated = entries.length > maxShow
         const shown = entries.slice(0, maxShow)
-        const fileList = shown.map(f => `${f.type === 'tree' ? '📁' : '📄'} ${f.path}`).join('\n   ')
+        const fileList = shown.map(f => `${f.type === 'tree' ? '[目录]' : '[文件]'} ${f.path}`).join('\n   ')
         content += `\n   文件结构 (${entries.length} 个):\n   ${fileList}`
         if (truncated) content += `\n   ... 共 ${entries.length} 个文件/目录`
       }
@@ -325,7 +325,7 @@ async function crawlGiteeRepo(repoUrl, match) {
     try {
       const readmeRaw = await fetchPage(`https://gitee.com/${owner}/${repo}/raw/${branch}/README.md`)
       if (readmeRaw && readmeRaw.length > 50) {
-        content += `\n\n📖 README:\n${readmeRaw.slice(0, 4000)}`
+        content += `\n\n[README] README:\n${readmeRaw.slice(0, 4000)}`
       }
     } catch {}
 
@@ -347,14 +347,14 @@ async function crawlGiteeRepoHTML(repoUrl, owner, repo, branch, subPath) {
         !/<span[^>]*class="[^"]*file-name[^"]*"/i.test(html)) {
       return {
         url: repoUrl,
-        content: `📦 Gitee: ${owner}/${repo}\n   ⚠️ 该仓库不存在或为私有仓库，无法访问。\n   请检查仓库名是否正确，或确认仓库是否为公开。`
+        content: `[归档] Gitee: ${owner}/${repo}\n   [!] 该仓库不存在或为私有仓库，无法访问。\n   请检查仓库名是否正确，或确认仓库是否为公开。`
       }
     }
 
     const descMatch = html.match(/<meta[^>]*name="description"[^>]*content="([^"]+)"/i)
     const description = descMatch ? descMatch[1].trim() : ''
 
-    let content = `📦 Gitee: ${owner}/${repo}\n`
+    let content = `[归档] Gitee: ${owner}/${repo}\n`
     if (description) content += `   描述: ${description}\n`
     content += `   地址: ${repoUrl}\n`
 
@@ -368,14 +368,14 @@ async function crawlGiteeRepoHTML(repoUrl, owner, repo, branch, subPath) {
       files.push(m[1].trim())
     }
     if (files.length > 0) {
-      const fileList = files.map(f => `📄 ${f}`).join('\n   ')
+      const fileList = files.map(f => `[文件] ${f}`).join('\n   ')
       content += `\n   文件结构 (${files.length} 个):\n   ${fileList}`
     }
 
     try {
       const readmeRaw = await fetchPage(`https://gitee.com/${owner}/${repo}/raw/${branch}/README.md`)
       if (readmeRaw && readmeRaw.length > 50) {
-        content += `\n\n📖 README:\n${readmeRaw.slice(0, 4000)}`
+        content += `\n\n[README] README:\n${readmeRaw.slice(0, 4000)}`
       }
     } catch {}
 
@@ -399,7 +399,7 @@ async function crawlGiteeFile(blobUrl, match) {
     const capped = code.length > CODE_MAX_LEN ? code.slice(0, CODE_MAX_LEN) + '\n\n// ... 文件过长，已截断' : code
     return {
       url: blobUrl,
-      content: `💻 ${path}\n\`\`\`${ext}\n${capped}\n\`\`\``
+      content: `[代码] ${path}\n\`\`\`${ext}\n${capped}\n\`\`\``
     }
   } catch { return null }
 }
@@ -413,7 +413,7 @@ async function crawlStackOverflow(url, match) {
     if (!data || !data.items || !data.items.length) return null
     const top = data.items[0]
     const answer = extractArticleText(top.body || '').slice(0, 6000)
-    return { url, content: `📋 StackOverflow 最高票答案 (${top.score} 票):\n${answer}` }
+    return { url, content: `[列表] StackOverflow 最高票答案 (${top.score} 票):\n${answer}` }
   } catch { return null }
 }
 
@@ -612,8 +612,8 @@ function extractArticleText(html, url = '') {
 
   // ─── Step 8: Assemble final output ───
   let final = ''
-  if (articleTitle && articleTitle.length > 3) final += `📰 ${articleTitle}\n`
-  if (pubDate) final += `📅 ${pubDate}\n`
+  if (articleTitle && articleTitle.length > 3) final += `[文章] ${articleTitle}\n`
+  if (pubDate) final += `[日期] ${pubDate}\n`
   if (final) final += '\n'
   final += result
 
@@ -716,7 +716,7 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
     const defaultBranch = info.default_branch || 'main'
     branch = branch === 'HEAD' ? defaultBranch : branch
 
-    let content = `📦 GitHub 仓库: ${info.full_name}\n`
+    let content = `[归档] GitHub 仓库: ${info.full_name}\n`
     content += `描述: ${info.description || '无'}\n`
     content += `⭐ ${info.stargazers_count} | Fork ${info.forks_count} | 语言: ${info.language || '未知'}\n`
     content += `License: ${(info.license && info.license.spdx_id) || '无'}\n`
@@ -773,7 +773,7 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
     // 4. Show directory tree for default branch (or first available)
     const defaultTree = branchTrees[defaultBranch] || Object.values(branchTrees)[0]
     if (defaultTree) {
-      content += `\n📂 文件树 (${defaultBranch} 分支, ${defaultTree.files.length} 个文件):\n`
+      content += `\n[目录] 文件树 (${defaultBranch} 分支, ${defaultTree.files.length} 个文件):\n`
 
       const sortedPaths = [...defaultTree.dirs].sort()
       const sortedFiles = defaultTree.files.map(f => f.path).sort()
@@ -802,10 +802,10 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
         for (const entry of entries) {
           const prefix = '  '.repeat(depth)
           if (entry.type === 'dir') {
-            result += `${prefix}📁 ${entry.name}/\n`
+            result += `${prefix}[目录] ${entry.name}/\n`
             result += renderTree(entry.fullPath, depth + 1)
           } else {
-            result += `${prefix}📄 ${entry.name}\n`
+            result += `${prefix}[文件] ${entry.name}\n`
           }
         }
         return result
@@ -821,7 +821,7 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
         const onlyInBr = bt.files.filter(f => !defaultFiles.has(f.path)).map(f => f.path)
         const onlyInDefault = defaultTree.files.filter(f => !brFiles.has(f.path)).map(f => f.path)
 
-        content += `\n📂 ${br.name} 分支 (${bt.files.length} 个文件)`
+        content += `\n[目录] ${br.name} 分支 (${bt.files.length} 个文件)`
         if (onlyInBr.length > 0 && onlyInBr.length <= 30) {
           content += ` | +${onlyInBr.length} 独有文件: ${onlyInBr.slice(0, 15).join(', ')}${onlyInBr.length > 15 ? '...' : ''}`
         } else if (onlyInBr.length > 0) {
@@ -845,7 +845,7 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
         const readmeRaw = await fetchPage(`https://raw.githubusercontent.com/${owner}/${repo}/${br.name}/README.md`)
         if (readmeRaw && readmeRaw.length > 20) {
           const capped = readmeRaw.slice(0, br.isDefault ? 6000 : 2000)
-          content += `\n\n═══════════════════════════════\n📖 README.md (${br.name}):\n${capped}\n`
+          content += `\n\n═══════════════════════════════\n[README] README.md (${br.name}):\n${capped}\n`
           totalReadSize += capped.length
           readFileSet.add('README.md')
         }
@@ -871,7 +871,7 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
         if (fileContent && fileContent.length > 5) {
           const capped = fileContent.length > DEEP_MAX_FILE_SIZE ? fileContent.slice(0, DEEP_MAX_FILE_SIZE) + '\n// ... 截断' : fileContent
           const ext = entry.path.split('.').pop() || ''
-          content += `\n\n═══════════════════════════════\n📄 ${entry.path} (${readBranch}):\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
+          content += `\n\n═══════════════════════════════\n[文件] ${entry.path} (${readBranch}):\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
           totalReadSize += capped.length
           readFileSet.add(entry.path)
         }
@@ -883,9 +883,9 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
     const remaining = otherEntries.slice(0, DEEP_MAX_FILES - keyEntries.length)
     for (const entry of remaining) {
       if (totalReadSize >= DEEP_MAX_TOTAL_SIZE) {
-        content += `\n⚠️ 已读取 ${Math.round(totalReadSize/1000)}KB，达到总量上限，以下文件未读取:\n`
+        content += `\n[!] 已读取 ${Math.round(totalReadSize/1000)}KB，达到总量上限，以下文件未读取:\n`
         const unread = remaining.filter(e => remaining.indexOf(e) >= remaining.indexOf(entry))
-        content += unread.slice(0, 30).map(e => `   📄 ${e.path}`).join('\n')
+        content += unread.slice(0, 30).map(e => `   [文件] ${e.path}`).join('\n')
         if (unread.length > 30) content += `\n   ... 共 ${unread.length} 个文件未读取`
         break
       }
@@ -897,7 +897,7 @@ async function crawlGitHubRepoDeep(repoUrl, match) {
         if (fileContent && fileContent.length > 5) {
           const capped = fileContent.length > DEEP_MAX_FILE_SIZE ? fileContent.slice(0, DEEP_MAX_FILE_SIZE) + '\n// ... 截断' : fileContent
           const ext = entry.path.split('.').pop() || ''
-          content += `\n\n═══════════════════════════════\n📄 ${entry.path} (${readBranch}):\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
+          content += `\n\n═══════════════════════════════\n[文件] ${entry.path} (${readBranch}):\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
           totalReadSize += capped.length
           readFileSet.add(entry.path)
         }
@@ -928,7 +928,7 @@ async function crawlGiteeRepoDeep(repoUrl, match) {
       return await crawlGiteeRepoHTML(repoUrl, owner, repo, branch, subPath)
     }
 
-    let content = `📦 Gitee 仓库: ${info.full_name}\n`
+    let content = `[归档] Gitee 仓库: ${info.full_name}\n`
     content += `描述: ${info.description || '无'}\n`
     content += `⭐ ${info.stargazers_count} | Fork ${info.forks_count} | 语言: ${info.language || '未知'}\n`
     content += `License: ${(info.license || '无')}\n`
@@ -959,7 +959,7 @@ async function crawlGiteeRepoDeep(repoUrl, match) {
       }
     })
 
-    content += `\n📂 完整文件树 (${files.length} 个文件):\n`
+    content += `\n[目录] 完整文件树 (${files.length} 个文件):\n`
     const sortedPaths = [...dirs].sort()
     const sortedFiles = files.map(f => f.path).sort()
     const entriesByParent = {}
@@ -990,10 +990,10 @@ async function crawlGiteeRepoDeep(repoUrl, match) {
       for (const entry of entries) {
         const prefix = '  '.repeat(depth)
         if (entry.type === 'dir') {
-          result += `${prefix}📁 ${entry.name}/\n`
+          result += `${prefix}[目录] ${entry.name}/\n`
           result += renderGiteeTree(entry.fullPath, depth + 1)
         } else {
-          result += `${prefix}📄 ${entry.name}\n`
+          result += `${prefix}[文件] ${entry.name}\n`
         }
       }
       return result
@@ -1006,7 +1006,7 @@ async function crawlGiteeRepoDeep(repoUrl, match) {
       const readmeRaw = await fetchPage(`https://gitee.com/${owner}/${repo}/raw/${branch}/README.md`)
       if (readmeRaw && readmeRaw.length > 20) {
         const capped = readmeRaw.slice(0, 6000)
-        content += `\n\n═══════════════════════════════\n📖 README.md:\n${capped}\n`
+        content += `\n\n═══════════════════════════════\n[README] README.md:\n${capped}\n`
         totalReadSize += capped.length
       }
     } catch {}
@@ -1027,7 +1027,7 @@ async function crawlGiteeRepoDeep(repoUrl, match) {
         if (fileContent && fileContent.length > 5) {
           const capped = fileContent.length > DEEP_MAX_FILE_SIZE ? fileContent.slice(0, DEEP_MAX_FILE_SIZE) + '\n// ... 截断' : fileContent
           const ext = entry.path.split('.').pop() || ''
-          content += `\n\n═══════════════════════════════\n📄 ${entry.path}:\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
+          content += `\n\n═══════════════════════════════\n[文件] ${entry.path}:\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
           totalReadSize += capped.length
         }
       } catch {}
@@ -1043,7 +1043,7 @@ async function crawlGiteeRepoDeep(repoUrl, match) {
         if (fileContent && fileContent.length > 5) {
           const capped = fileContent.length > DEEP_MAX_FILE_SIZE ? fileContent.slice(0, DEEP_MAX_FILE_SIZE) + '\n// ... 截断' : fileContent
           const ext = entry.path.split('.').pop() || ''
-          content += `\n\n═══════════════════════════════\n📄 ${entry.path}:\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
+          content += `\n\n═══════════════════════════════\n[文件] ${entry.path}:\n\`\`\`${ext}\n${capped}\n\`\`\`\n`
           totalReadSize += capped.length
         }
       } catch {}

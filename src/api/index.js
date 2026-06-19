@@ -263,6 +263,194 @@ export const conversations = {
   }
 }
 
+// Code Conversations
+export const codeConversations = {
+  list() {
+    return request('/code-conversations')
+  },
+  create(id, title, projectPath, projectName) {
+    return request('/code-conversations', {
+      method: 'POST',
+      body: JSON.stringify({ id, title, projectPath, projectName })
+    })
+  },
+  get(id) {
+    return request('/code-conversations/' + id)
+  },
+  update(id, data) {
+    return request('/code-conversations/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+  delete(id) {
+    return request('/code-conversations/' + id, { method: 'DELETE' })
+  },
+  messages(id) {
+    return request('/code-conversations/' + id + '/messages')
+  },
+  addMessage(convId, data) {
+    return request('/code-conversations/' + convId + '/messages', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  },
+  updateMessage(convId, msgId, data) {
+    return request('/code-conversations/' + convId + '/messages/' + msgId, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+}
+
+// Agent Conversations
+export const agentConversations = {
+  list() {
+    return request('/agent-conversations')
+  },
+  create(id, title) {
+    return request('/agent-conversations', {
+      method: 'POST',
+      body: JSON.stringify({ id, title })
+    })
+  },
+  get(id) {
+    return request('/agent-conversations/' + id)
+  },
+  update(id, data) {
+    return request('/agent-conversations/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+  delete(id) {
+    return request('/agent-conversations/' + id, { method: 'DELETE' })
+  },
+  messages(id) {
+    return request('/agent-conversations/' + id + '/messages')
+  },
+  addMessage(convId, data) {
+    return request('/agent-conversations/' + convId + '/messages', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  },
+  updateMessage(convId, msgId, data) {
+    return request('/agent-conversations/' + convId + '/messages/' + msgId, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+}
+
+// Collections (server API)
+export const collectionsApi = {
+  list() {
+    return request('/collections')
+  },
+  create(name) {
+    const id = 'col_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+    return request('/collections', {
+      method: 'POST',
+      body: JSON.stringify({ id, name })
+    })
+  },
+  rename(id, name) {
+    return request('/collections/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ name })
+    })
+  },
+  delete(id) {
+    return request('/collections/' + id, { method: 'DELETE' })
+  },
+  findByName(name) {
+    return request('/collections/find-by-name?name=' + encodeURIComponent(name))
+  },
+  // Items
+  getItems(collectionId) {
+    const qs = collectionId ? '?collection_id=' + collectionId : ''
+    return request('/collection-items' + qs)
+  },
+  getAllItems() {
+    return request('/collection-items/all')
+  },
+  searchItems(q) {
+    return request('/collection-items/search?q=' + encodeURIComponent(q))
+  },
+  saveItem(collectionId, msgJson, preview) {
+    return request('/collection-items', {
+      method: 'POST',
+      body: JSON.stringify({ collection_id: collectionId || null, msg_json: msgJson, preview })
+    })
+  },
+  isDuplicate(collectionId, msgJson) {
+    return request('/collection-items/check-duplicate', {
+      method: 'POST',
+      body: JSON.stringify({ collection_id: collectionId || null, msg_json: msgJson })
+    })
+  },
+  updateItem(itemId, msgJson, preview) {
+    return request('/collection-items/' + itemId, {
+      method: 'PATCH',
+      body: JSON.stringify({ msg_json: msgJson, preview })
+    })
+  },
+  deleteItem(itemId) {
+    return request('/collection-items/' + itemId, { method: 'DELETE' })
+  },
+  moveItem(itemId, newCollectionId) {
+    return request('/collection-items/' + itemId + '/move', {
+      method: 'POST',
+      body: JSON.stringify({ new_collection_id: newCollectionId })
+    })
+  },
+}
+
+// Folders
+export const foldersApi = {
+  list() {
+    return request('/folders')
+  },
+  create(name, parentId) {
+    const id = 'fld_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+    return request('/folders', {
+      method: 'POST',
+      body: JSON.stringify({ id, name, parent_id: parentId || null })
+    })
+  },
+  rename(id, name) {
+    return request('/folders/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ name })
+    })
+  },
+  delete(id) {
+    return request('/folders/' + id, { method: 'DELETE' })
+  },
+  move(id, newParentId) {
+    return request('/folders/' + id + '/move', {
+      method: 'POST',
+      body: JSON.stringify({ new_parent_id: newParentId || null })
+    })
+  },
+}
+
+// Local Auth
+export const localAuth = {
+  async login() {
+    const res = await fetch('/api/auth/local', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body?.error?.message || body?.error || '本地登录失败')
+    const data = body && typeof body === 'object' && 'success' in body ? body.data : body
+    if (data.token) {
+      localStorage.setItem('bbot_token', data.token)
+      localStorage.setItem('bbot_user', JSON.stringify(data.user || { id: 'local-user', name: '本地用户' }))
+    }
+    return data
+  }
+}
+
 export function isLoggedIn() {
   return !!getToken() || !!(localStorage.getItem('apikey'))
 }

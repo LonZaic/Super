@@ -1,7 +1,7 @@
 const Database = require('better-sqlite3')
 const path = require('path')
 
-const DB_PATH = path.join(__dirname, 'bbot.db')
+const DB_PATH = path.join(__dirname, '..', 'bbot.db')
 const db = new Database(DB_PATH)
 
 // Enable WAL mode for better concurrent performance
@@ -106,10 +106,89 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conv_id);
   CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+
+  CREATE TABLE IF NOT EXISTS code_conversations (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'local-user',
+    title TEXT DEFAULT 'Code 对话',
+    project_path TEXT DEFAULT '',
+    project_name TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS code_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conv_id TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT 'local-user',
+    role TEXT NOT NULL,
+    text TEXT DEFAULT '',
+    html TEXT DEFAULT '',
+    thinking TEXT DEFAULT '',
+    tasks_json TEXT DEFAULT '[]',
+    events_json TEXT DEFAULT '[]',
+    done INTEGER DEFAULT 0,
+    error INTEGER DEFAULT 0,
+    timer TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (conv_id) REFERENCES code_conversations(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS agent_conversations (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'local-user',
+    title TEXT DEFAULT 'Agent 对话',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS agent_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conv_id TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT 'local-user',
+    role TEXT NOT NULL,
+    text TEXT DEFAULT '',
+    events TEXT DEFAULT '[]',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (conv_id) REFERENCES agent_conversations(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS collections (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'local-user',
+    name TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  CREATE TABLE IF NOT EXISTS collection_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id TEXT,
+    user_id TEXT NOT NULL DEFAULT 'local-user',
+    msg_json TEXT DEFAULT '[]',
+    preview TEXT DEFAULT '',
+    snippet TEXT DEFAULT '',
+    msg_id INTEGER,
+    conv_id TEXT,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'local-user',
+    name TEXT NOT NULL DEFAULT '新文件夹',
+    parent_id TEXT,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
+  );
 `)
 
-// Safe migration: add download_files column to existing databases
+// Safe migrations: add missing columns to existing databases
 try { db.exec('ALTER TABLE messages ADD COLUMN download_files TEXT DEFAULT \'[]\'') } catch {}
+try { db.exec('ALTER TABLE messages ADD COLUMN side_quest TEXT DEFAULT \'\'') } catch {}
+try { db.exec('ALTER TABLE conversations ADD COLUMN folder_id TEXT') } catch {}
+try { db.exec('ALTER TABLE conversations ADD COLUMN sort_order INTEGER DEFAULT 0') } catch {}
 
 // ─── User queries ───
 const user = {
@@ -328,10 +407,11 @@ const conv = {
   getMessages(convId, userId) {
     return db.prepare('SELECT * FROM messages WHERE conv_id = ? AND user_id = ? ORDER BY id ASC').all(convId, userId)
   },
-  addMessage(convId, userId, role, text, parentId, files, designs, reasoning, downloadFiles = '[]') {
+  addMessage(convId, userId, role, text, parentId, files, designs, reasoning, downloadFiles = '[]', sideQuest = '') {
     try { db.exec('ALTER TABLE messages ADD COLUMN download_files TEXT DEFAULT \'[]\'') } catch {}
-    const stmt = db.prepare('INSERT INTO messages (conv_id, user_id, role, text, parent_id, files, designs, reasoning, download_files) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    const result = stmt.run(convId, userId, role, text, parentId || null, files || '[]', designs || '[]', reasoning || '', downloadFiles)
+    try { db.exec('ALTER TABLE messages ADD COLUMN side_quest TEXT DEFAULT \'\'') } catch {}
+    const stmt = db.prepare('INSERT INTO messages (conv_id, user_id, role, text, parent_id, files, designs, reasoning, download_files, side_quest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    const result = stmt.run(convId, userId, role, text, parentId || null, files || '[]', designs || '[]', reasoning || '', downloadFiles, sideQuest)
     return result.lastInsertRowid
   },
   updateMessage(id, userId, text) {
@@ -372,4 +452,140 @@ const conv = {
   },
 }
 
-module.exports = { db, user, friend, dm, room, agentRuns, conv }
+// ─── Code Conversations ───
+const codeConv = {
+  create(id, userId, title, projectPath, projectName) {
+    db.prepare('INSERT INTO code_conversations (id, user_id, title, project_path, project_name) VALUES (?, ?, ?, ?, ?)').run(id, userId, title || 'Code 对话', projectPath || '', projectName || '')
+  },
+  listForUser(userId) {
+    return db.prepare('SELECT * FROM code_conversations WHERE user_id = ? ORDER BY created_at DESC').all(userId)
+  },
+  findById(id, userId) {
+    return db.prepare('SELECT * FROM code_conversations WHERE id = ? AND user_id = ?').get(id, userId)
+  },
+  updateTitle(id, userId, title) {
+    db.prepare('UPDATE code_conversations SET title = ? WHERE id = ? AND user_id = ?').run(title, id, userId)
+  },
+  updateProject(id, userId, projectPath, projectName) {
+    db.prepare('UPDATE code_conversations SET project_path = ?, project_name = ? WHERE id = ? AND user_id = ?').run(projectPath, projectName, id, userId)
+  },
+  delete(id, userId) {
+    db.prepare('DELETE FROM code_messages WHERE conv_id = ? AND user_id = ?').run(id, userId)
+    db.prepare('DELETE FROM code_conversations WHERE id = ? AND user_id = ?').run(id, userId)
+  },
+  getMessages(convId, userId) {
+    return db.prepare('SELECT * FROM code_messages WHERE conv_id = ? AND user_id = ? ORDER BY id ASC').all(convId, userId)
+  },
+  addMessage(convId, userId, role, text, html, thinking, tasksJson, eventsJson, done, error, timer) {
+    const stmt = db.prepare('INSERT INTO code_messages (conv_id, user_id, role, text, html, thinking, tasks_json, events_json, done, error, timer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    const result = stmt.run(convId, userId, role, text, html || '', thinking || '', tasksJson || '[]', eventsJson || '[]', done || 0, error || 0, timer || '')
+    return result.lastInsertRowid
+  },
+  updateMessage(id, userId, text, html, thinking, tasksJson, eventsJson, done, error, timer) {
+    db.prepare('UPDATE code_messages SET text=?, html=?, thinking=?, tasks_json=?, events_json=?, done=?, error=?, timer=? WHERE id=? AND user_id=?').run(text, html || '', thinking || '', tasksJson || '[]', eventsJson || '[]', done || 0, error || 0, timer || '', id, userId)
+  },
+}
+
+// ─── Agent Conversations ───
+const agentConv = {
+  create(id, userId, title) {
+    db.prepare('INSERT INTO agent_conversations (id, user_id, title) VALUES (?, ?, ?)').run(id, userId, title || 'Agent 对话')
+  },
+  listForUser(userId) {
+    return db.prepare('SELECT * FROM agent_conversations WHERE user_id = ? ORDER BY created_at DESC').all(userId)
+  },
+  findById(id, userId) {
+    return db.prepare('SELECT * FROM agent_conversations WHERE id = ? AND user_id = ?').get(id, userId)
+  },
+  updateTitle(id, userId, title) {
+    db.prepare('UPDATE agent_conversations SET title = ? WHERE id = ? AND user_id = ?').run(title, id, userId)
+  },
+  delete(id, userId) {
+    db.prepare('DELETE FROM agent_messages WHERE conv_id = ? AND user_id = ?').run(id, userId)
+    db.prepare('DELETE FROM agent_conversations WHERE id = ? AND user_id = ?').run(id, userId)
+  },
+  getMessages(convId, userId) {
+    return db.prepare('SELECT * FROM agent_messages WHERE conv_id = ? AND user_id = ? ORDER BY id ASC').all(convId, userId)
+  },
+  addMessage(convId, userId, role, text, eventsJson) {
+    const stmt = db.prepare('INSERT INTO agent_messages (conv_id, user_id, role, text, events) VALUES (?, ?, ?, ?, ?)')
+    const result = stmt.run(convId, userId, role, text, eventsJson || '[]')
+    return result.lastInsertRowid
+  },
+  updateMessage(id, userId, text, eventsJson) {
+    db.prepare('UPDATE agent_messages SET text = ?, events = ? WHERE id = ? AND user_id = ?').run(text, eventsJson || '[]', id, userId)
+  },
+}
+
+// ─── Collections ───
+const collection = {
+  create(id, userId, name) {
+    db.prepare('INSERT INTO collections (id, user_id, name) VALUES (?, ?, ?)').run(id, userId, name)
+  },
+  listForUser(userId) {
+    return db.prepare('SELECT * FROM collections WHERE user_id = ? ORDER BY created_at DESC').all(userId)
+  },
+  findByName(userId, name) {
+    return db.prepare("SELECT * FROM collections WHERE user_id = ? AND name = ? LIMIT 1").get(userId, name)
+  },
+  rename(id, userId, name) {
+    db.prepare('UPDATE collections SET name = ? WHERE id = ? AND user_id = ?').run(name, id, userId)
+  },
+  delete(id, userId) {
+    db.prepare('DELETE FROM collection_items WHERE collection_id = ? AND user_id = ?').run(id, userId)
+    db.prepare('DELETE FROM collections WHERE id = ? AND user_id = ?').run(id, userId)
+  },
+  // Items
+  getItems(collectionId, userId) {
+    if (collectionId) return db.prepare('SELECT * FROM collection_items WHERE collection_id = ? AND user_id = ? ORDER BY created_at DESC').all(collectionId, userId)
+    return db.prepare('SELECT * FROM collection_items WHERE user_id = ? ORDER BY created_at DESC').all(userId)
+  },
+  getAllItems(userId) {
+    return db.prepare('SELECT * FROM collection_items WHERE user_id = ? ORDER BY created_at DESC').all(userId)
+  },
+  searchItems(userId, query) {
+    const q = '%' + query + '%'
+    return db.prepare("SELECT * FROM collection_items WHERE user_id = ? AND (preview LIKE ? OR msg_json LIKE ?) ORDER BY created_at DESC").all(userId, q, q)
+  },
+  saveItem(collectionId, userId, msgJson, preview) {
+    const stmt = db.prepare('INSERT INTO collection_items (collection_id, user_id, msg_json, preview) VALUES (?, ?, ?, ?)')
+    const result = stmt.run(collectionId || null, userId, msgJson, preview || '')
+    return result.lastInsertRowid
+  },
+  isDuplicate(collectionId, userId, msgJson) {
+    const row = db.prepare('SELECT id FROM collection_items WHERE collection_id = ? AND user_id = ? AND msg_json = ? LIMIT 1').get(collectionId || null, userId, msgJson)
+    return !!row
+  },
+  updateItemContent(id, userId, msgJson, preview) {
+    db.prepare('UPDATE collection_items SET msg_json = ?, preview = ? WHERE id = ? AND user_id = ?').run(msgJson, preview || '', id, userId)
+  },
+  deleteItem(id, userId) {
+    db.prepare('DELETE FROM collection_items WHERE id = ? AND user_id = ?').run(id, userId)
+  },
+  moveItem(itemId, userId, newCollectionId) {
+    db.prepare('UPDATE collection_items SET collection_id = ? WHERE id = ? AND user_id = ?').run(newCollectionId, itemId, userId)
+  },
+}
+
+// ─── Folders ───
+const folder = {
+  listForUser(userId) {
+    return db.prepare('SELECT * FROM folders WHERE user_id = ? ORDER BY sort_order, created_at').all(userId)
+  },
+  create(id, userId, name, parentId) {
+    db.prepare('INSERT INTO folders (id, user_id, name, parent_id) VALUES (?, ?, ?, ?)').run(id, userId, name, parentId || null)
+  },
+  rename(id, userId, name) {
+    db.prepare('UPDATE folders SET name = ? WHERE id = ? AND user_id = ?').run(name, id, userId)
+  },
+  delete(id, userId) {
+    db.prepare("UPDATE conversations SET folder_id = NULL WHERE folder_id = ? AND user_id = ?").run(id, userId)
+    db.prepare("UPDATE folders SET parent_id = NULL WHERE parent_id = ? AND user_id = ?").run(id, userId)
+    db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(id, userId)
+  },
+  move(id, userId, newParentId) {
+    db.prepare('UPDATE folders SET parent_id = ? WHERE id = ? AND user_id = ?').run(newParentId || null, id, userId)
+  },
+}
+
+module.exports = { db, user, friend, dm, room, agentRuns, conv, codeConv, agentConv, collection, folder }

@@ -239,6 +239,7 @@ const ENTITY_MAP = {
 // ─── HTTP fetch helper ───
 function fetchHTML(url, customHeaders) {
   return new Promise((resolve, reject) => {
+    const parsed = new (require('url').URL)(url)
     const headers = customHeaders || {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml',
@@ -248,7 +249,8 @@ function fetchHTML(url, customHeaders) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
         const loc = res.headers.location
         if (loc) {
-          const target = loc.startsWith('http') ? loc : `https://cn.bing.com${loc}`
+          // Resolve redirect URL relative to ORIGINAL request host (not hardcoded to Bing)
+          const target = loc.startsWith('http') ? loc : `${parsed.protocol}//${parsed.host}${loc}`
           fetchHTML(target, customHeaders).then(resolve).catch(reject)
           return
         }
@@ -257,10 +259,36 @@ function fetchHTML(url, customHeaders) {
         reject(new Error(`HTTP ${res.statusCode}`))
         return
       }
-      let body = ''
-      res.setEncoding('utf8')
-      res.on('data', chunk => body += chunk)
-      res.on('end', () => resolve(body))
+      // Detect charset for proper decoding (Bing/Sogou may use non-UTF8)
+      const ct = res.headers['content-type'] || ''
+      const charsetMatch = ct.match(/charset=([^\s;]+)/i)
+      const charset = charsetMatch ? charsetMatch[1].toLowerCase() : 'utf-8'
+      if (charset.includes('gb') || charset.includes('big5') || charset.includes('gb2312')) {
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks)
+          // Try iconv-lite if available, otherwise fall back to utf8 with replacement chars
+          try {
+            const iconv = require('iconv-lite')
+            resolve(iconv.decode(buf, charset))
+          } catch {
+            // No iconv-lite — decode as utf8 (most modern CN sites default to utf8 anyway)
+            const text = buf.toString('utf8')
+            // If result looks garbled, try latin1→utf8 re-encode
+            if (/[\x80-\xFF]{3,}/.test(text)) {
+              resolve(buf.toString('latin1'))
+            } else {
+              resolve(text)
+            }
+          }
+        })
+      } else {
+        res.setEncoding('utf8')
+        let body = ''
+        res.on('data', chunk => body += chunk)
+        res.on('end', () => resolve(body))
+      }
       res.on('error', reject)
     })
     req.on('timeout', () => { req.destroy(); reject(new Error('timeout')) })
@@ -458,30 +486,52 @@ function parseBingResults(html, limit) {
   const results = []
   const cleanHtml = html.replace(/<li class="b_ad"[\s\S]*?<\/li>/gi, '')
 
+  // Primary: parse <li class="b_algo"> blocks
   const blocks = cleanHtml.split(/<li class="b_algo"/i)
-  if (blocks.length < 2) return results
+  if (blocks.length >= 2) {
+    for (let i = 1; i < blocks.length && results.length < limit; i++) {
+      const block = blocks[i]
+      if (/class="b_ad"/i.test(block)) continue
 
-  for (let i = 1; i < blocks.length && results.length < limit; i++) {
-    const block = blocks[i]
-    if (/class="b_ad"/i.test(block)) continue
+      const titleMatch = block.match(/<h2[^>]*><a[^>]*>([\s\S]*?)<\/a><\/h2>/i)
+      if (!titleMatch) continue
+      const title = cleanHTML(titleMatch[1])
+      if (!title || title.length < 3) continue
 
-    const titleMatch = block.match(/<h2[^>]*><a[^>]*>([\s\S]*?)<\/a><\/h2>/i)
-    if (!titleMatch) continue
-    const title = cleanHTML(titleMatch[1])
-    if (!title || title.length < 3) continue
+      const urlMatch = block.match(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>/i)
+      const url = urlMatch ? urlMatch[1] : ''
 
-    const urlMatch = block.match(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>/i)
-    const url = urlMatch ? urlMatch[1] : ''
+      let snippet = ''
+      const pMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i)
+      if (pMatch) snippet = cleanHTML(pMatch[1]).slice(0, 300)
 
-    let snippet = ''
-    const pMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i)
-    if (pMatch) snippet = cleanHTML(pMatch[1]).slice(0, 300)
+      const dateInfo = extractDateFromSnippet(snippet + ' ' + title)
 
-    // Extract date hints from snippet
-    const dateInfo = extractDateFromSnippet(snippet + ' ' + title)
+      if (title) {
+        results.push({ title, url, snippet, dateInfo, isNews: false })
+      }
+    }
+  }
 
-    if (title) {
-      results.push({ title, url, snippet, dateInfo, isNews: false })
+  // Fallback: if primary parsing found nothing, try generic link extraction
+  // Bing may change HTML markup — this ensures we still get something useful
+  if (results.length === 0) {
+    const linkRegex = /<a[^>]*href="(https?:\/\/(?!(?:cn|www)\.bing\.com|bing\.com\/ck|go\.microsoft\.com)[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
+    let m
+    while ((m = linkRegex.exec(html)) !== null && results.length < limit) {
+      const url = m[1]
+      const title = cleanHTML(m[2])
+      if (!title || title.length < 5) continue
+      if (/^(?:首页|下一页|上一页|登录|注册|搜索|Cookie|隐私|条款|帮助|反馈)$/i.test(title)) continue
+      // Find nearby text as snippet (up to 500 chars after the link)
+      const afterIdx = m.index + m[0].length
+      const afterText = html.slice(afterIdx, afterIdx + 600)
+      const snippetMatch = afterText.match(/>([^<]{20,200})<\//)
+      const snippet = snippetMatch ? cleanHTML(snippetMatch[1]).slice(0, 250) : ''
+      const dateInfo = extractDateFromSnippet(snippet + ' ' + title)
+      if (!results.find(r => r.url === url)) {
+        results.push({ title, url, snippet, dateInfo, isNews: false })
+      }
     }
   }
 
@@ -655,7 +705,7 @@ function isPoorResults(results, query) {
     const hasHighCred = results.some(r => scoreSourceCredibility(r.url, r.title, r.snippet) >= 0.9)
     if (!hasFresh && !hasHighCred && results.length <= 3) {
       // Not a hard fail, but a warning flag
-      console.log('[search:verify] ⚠️ Breaking news query has no fresh/high-cred results')
+      console.log('[search:verify] [!] Breaking news query has no fresh/high-cred results')
     }
   }
 
@@ -814,7 +864,7 @@ async function searchGitHubEntity(query) {
       try {
         const readmeRes = await fetchHTML('https://raw.githubusercontent.com/' + owner + '/' + repo + '/HEAD/README.md')
         if (readmeRes && readmeRes.length > 50) {
-          extraContent += '\n📖 README摘要:\n' + readmeRes.slice(0, 2000) + '\n'
+          extraContent += '\n[读我] README摘要:\n' + readmeRes.slice(0, 2000) + '\n'
         }
       } catch {}
       try {
@@ -822,7 +872,7 @@ async function searchGitHubEntity(query) {
         if (pkgRes && pkgRes.length > 10) {
           try {
             const pkg = JSON.parse(pkgRes)
-            extraContent += '\n📦 项目配置:\n'
+            extraContent += '\n[配置] 项目配置:\n'
             extraContent += '   名称: ' + (pkg.name || 'N/A') + '\n'
             extraContent += '   描述: ' + (pkg.description || 'N/A') + '\n'
             if (pkg.dependencies) extraContent += '   依赖: ' + Object.keys(pkg.dependencies).slice(0, 10).join(', ') + '\n'
@@ -833,8 +883,8 @@ async function searchGitHubEntity(query) {
       try {
         const treeRes = await fetchJSON('https://api.github.com/repos/' + owner + '/' + repo + '/git/trees/HEAD?recursive=0')
         if (treeRes && treeRes.tree) {
-          const files = treeRes.tree.map(f => (f.type === 'tree' ? '📁' : '📄') + ' ' + f.path)
-          extraContent += '\n📂 根目录文件:\n   ' + files.slice(0, 25).join('\n   ')
+          const files = treeRes.tree.map(f => (f.type === 'tree' ? '[目录]' : '[文件]') + ' ' + f.path)
+          extraContent += '\n[目录] 根目录文件:\n   ' + files.slice(0, 25).join('\n   ')
           if (files.length > 25) extraContent += '\n   ... 共' + files.length + '个'
         }
       } catch {}
@@ -1050,16 +1100,19 @@ async function webSearchVerified(query, maxResults = 5) {
   const validated = crossValidateResults(allResults, query)
 
   // ─── Stage 4: Deep crawl — MANDATORY, crawl all credible URLs ───
+  // Filter out non-crawlable URLs: SVG namespaces, data URIs, bing redirect trackers
+  const CRAWL_SKIP_PATTERNS = /w3\.org\/\d{4}\/svg|w3\.org\/1999\/xhtml|schema\.org|purl\.org|typepad\.com|bing\.com\/ck|go\.microsoft\.com\/fwlink/i
   let crawledText = ''
   const urlsToCrawl = (validated.length > 0 ? validated : allResults)
     .slice(0, 5).map(r => r.url).filter(Boolean)
+    .filter(u => !CRAWL_SKIP_PATTERNS.test(u) && u.startsWith('http'))
   if (urlsToCrawl.length > 0) {
     try {
       const { crawlPages } = require('./crawler')
       const crawled = await crawlPages(urlsToCrawl)
       const validCrawled = crawled.filter(c => c && c.content && c.content.length > 30)
       if (validCrawled.length > 0) {
-        crawledText = '\n\n📄 深度抓取内容:\n' + validCrawled.map(r =>
+        crawledText = '\n\n[文件] 深度抓取内容:\n' + validCrawled.map(r =>
           `[来源: ${r.url}]\n${r.content}`
         ).join('\n\n')
       }
@@ -1086,10 +1139,10 @@ async function webSearchVerified(query, maxResults = 5) {
 
   // ─── Stage 6: Anti-hallucination warning ───
   if (validated.length === 0) {
-    text += '\n⚠️ 以上搜索未返回有效结果。请勿凭空编造信息。如不确定，请明确告知用户"未找到相关信息"。'
+    text += '\n[!] 以上搜索未返回有效结果。请勿凭空编造信息。如不确定，请明确告知用户"未找到相关信息"。'
   }
   if (validated.length > 0 && validated.every(r => r.confidence < 0.5)) {
-    text += '\n⚠️ 搜索结果置信度较低。回答时请标注不确定性，建议用户交叉验证。'
+    text += '\n[!] 搜索结果置信度较低。回答时请标注不确定性，建议用户交叉验证。'
   }
 
   // ─── Cache result ───

@@ -335,7 +335,7 @@ const L = {
   codePlanDone:    ['规划完成', '規劃完成', '規劃完成', 'Planning done'],
   codeStepDone:    ['完成步骤', '完成步驟', '完成步驟', 'Step done'],
   codeHandoff:     ['上下文使用率较高，准备接力...', '上下文使用率較高，準備接力...', '上下文使用率較高，準備接力...', 'Context usage high, preparing handoff...'],
-  codeAllDone:     ['✓ 全部任务完成', '✓ 全部任務完成', '✓ 全部任務完成', 'All tasks completed'],
+  codeAllDone:     ['[完成] 全部任务完成', '[完成] 全部任務完成', '[完成] 全部任務完成', 'All tasks completed'],
   codeMoreSteps:   ['+{n} 步', '+{n} 步', '+{n} 步', '+{n} more'],
   codeShowDetail:  ['查看详情', '查看詳情', '檢視詳情', 'Details'],
   codeHideDetail:  ['收起详情', '收起詳情', '收起詳情', 'Hide'],

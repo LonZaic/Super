@@ -9,6 +9,8 @@
   --accent-active: #3b5fd9;
   --accent-muted: rgba(79, 125, 255, 0.10);
   --accent-glow: rgba(79, 125, 255, 0.20);
+  --body-bg-gradient: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(79,125,255,0.06) 0%, transparent 60%),
+                      radial-gradient(ellipse 40% 40% at 80% 90%, rgba(79,125,255,0.04) 0%, transparent 50%);
 
   --bg: #1a1916;
   --bg2: #222220;

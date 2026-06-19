@@ -1,28 +1,17 @@
-// Weather API Routes — Open-Meteo (free, no key)
+// Weather API Routes — wttr.in (free, no key, unlimited)
 const { Router } = require('express')
 const https = require('https')
 
 const router = Router()
 
-const WMO_CODES = {
-  0: '晴天', 1: '大部晴朗', 2: '多云', 3: '阴天',
-  45: '雾', 48: '霜雾',
-  51: '小毛毛雨', 53: '毛毛雨', 55: '大毛毛雨',
-  61: '小雨', 63: '中雨', 65: '大雨',
-  71: '小雪', 73: '中雪', 75: '大雪',
-  80: '阵雨', 81: '中阵雨', 82: '大阵雨',
-  85: '小阵雪', 86: '大阵雪',
-  95: '雷暴', 96: '雷暴+冰雹', 99: '强雷暴+冰雹',
-}
-
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, { timeout: 10000 }, res => {
+    https.get(url, { timeout: 15000 }, res => {
       let body = ''
       res.on('data', chunk => body += chunk)
       res.on('end', () => {
         try { resolve(JSON.parse(body)) }
-        catch (e) { reject(new Error('JSON parse failed')) }
+        catch (e) { reject(new Error('JSON parse failed: ' + body.slice(0, 200))) }
       })
       res.on('error', reject)
     }).on('timeout', function () { this.destroy(); reject(new Error('timeout')) })
@@ -30,82 +19,109 @@ function fetchJSON(url) {
   })
 }
 
+// wttr.in weather code → Chinese description
+const WEATHER_DESC = {
+  113: '晴天', 116: '多云', 119: '阴天', 122: '阴天',
+  143: '雾', 176: '零星小雨', 179: '零星小雪',
+  182: '雨夹雪', 185: '雨夹雪',
+  200: '雷阵雨', 227: '阵雪', 230: '暴风雪',
+  248: '雾', 260: '霜雾',
+  263: '毛毛雨', 266: '零星小雨', 281: '雨夹雪',
+  284: '雨夹雪', 293: '小雨', 296: '毛毛雨',
+  299: '中雨', 302: '中雨', 305: '大雨', 308: '强降雨',
+  311: '小雨', 314: '中雨', 317: '雨夹雪', 320: '雨夹雪',
+  323: '小雪', 326: '小雪', 329: '中雪', 332: '中雪',
+  335: '大雪', 338: '大雪', 350: '冰雹', 353: '阵雨',
+  356: '中阵雨', 359: '大阵雨', 362: '雨夹雪', 365: '雨夹雪',
+  368: '阵雪', 371: '大阵雪', 374: '冰雹', 377: '冰雹',
+  386: '雷阵雨', 389: '雷暴', 392: '雷暴+冰雹', 395: '强雷暴+冰雹',
+}
+
 router.get('/weather', async (req, res) => {
   try {
-    const { city, lat, lon, days } = req.query
-    const forecastDays = Math.min(parseInt(days) || 7, 16)
+    const { city, days } = req.query
+    const forecastDays = Math.min(parseInt(days) || 7, 7)
 
-    let latitude, longitude, cityName
-
-    if (lat && lon) {
-      latitude = parseFloat(lat)
-      longitude = parseFloat(lon)
-      cityName = city || `${lat},${lon}`
-    } else if (city) {
-      // ─── Clean input ───
-      let q = city.trim()
-        .replace(/[度°]/, '')                          // "30°" → "30"
-        .replace(/[天气预报气温温度湿度]$/, '')          // "佛山天气" → "佛山"
-        .replace(/[今明后昨大][天日]/, '')               // "佛山明天" → "佛山"
-        .replace(/[的早晚上下周]/, '')                   // "佛山今晚" → "佛山"
-        .replace(/^[省市]$/g, '')                        // remove bare "省""市"
-        .trim()
-      if (!q) q = city.trim()
-
-      async function geocode(query) {
-        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=zh`
-        const d = await fetchJSON(url)
-        return d.results?.[0] || null
-      }
-
-      let result = await geocode(q)
-
-      // ─── Fallback chain ───
-      if (!result) {
-        const candidates = []
-
-        // "广东佛山" → try last 2 chars "佛山"
-        if (q.length > 3) candidates.push(q.slice(-2))
-        // "广州市天河区" → strip 市/区 → "广州天河" → try each
-        const stripped = q.replace(/[市 ]/g, '').replace(/[区]$/, '')
-        if (stripped !== q) candidates.push(stripped)
-        // "佛山南海" → try first 2 chars "佛山"
-        if (q.length > 2 && q.length <= 5) candidates.push(q.slice(0, 2))
-        // "南海" or 3+ chars that are still failing → try prepending "广州" or search as-is with count=5
-        if (q.length <= 3) candidates.push(q)
-
-        for (const c of [...new Set(candidates)]) {
-          result = await geocode(c)
-          if (result) break
-        }
-      }
-
-      if (!result) {
-        return res.status(404).json({ error: `未找到该城市: ${city}` })
-      }
-
-      latitude = result.latitude
-      longitude = result.longitude
-      cityName = result.name + (result.admin1 ? `, ${result.admin1}` : '') + (result.country ? `, ${result.country}` : '')
-    } else {
-      return res.status(400).json({ error: '请提供 city 或 lat/lon 参数' })
+    if (!city) {
+      return res.status(400).json({ error: '请提供 city 参数' })
     }
 
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,wind_speed_10m_max&timezone=Asia/Shanghai&forecast_days=${forecastDays}`
-    const data = await fetchJSON(weatherUrl)
+    // Clean city name for URL
+    let q = city.trim()
+    // Try to keep Chinese city names intact — wttr.in handles them well
+    const encoded = encodeURIComponent(q)
 
-    const days_data = data.daily.time.map((date, i) => ({
-      date,
-      temp_max: data.daily.temperature_2m_max[i],
-      temp_min: data.daily.temperature_2m_min[i],
-      weather: WMO_CODES[data.daily.weather_code[i]] || '未知',
-      precip_prob: data.daily.precipitation_probability_max[i],
-      wind_max: data.daily.wind_speed_10m_max[i],
-    }))
+    // Fetch from wttr.in with JSON format
+    const url = `https://wttr.in/${encoded}?format=j1`
+    const data = await fetchJSON(url)
 
-    res.json({ city: cityName, latitude, longitude, days: days_data })
+    if (!data || !data.current_condition || !data.current_condition.length) {
+      return res.status(404).json({ error: `未找到该城市天气数据: ${city}，请尝试用城市名（如"深圳"、"北京"）或英文名` })
+    }
+
+    const current = data.current_condition[0]
+    const cityName = (data.nearest_area && data.nearest_area[0])
+      ? [data.nearest_area[0].areaName?.[0]?.value, data.nearest_area[0].country?.[0]?.value].filter(Boolean).join(', ')
+      : q
+
+    // Parse current conditions
+    const currentWeather = {
+      temp_c: current.temp_C,
+      feels_like_c: current.FeelsLikeC,
+      humidity: current.humidity,
+      weather_desc: current.weatherDesc?.[0]?.value || '',
+      weather_code: WEATHER_DESC[parseInt(current.weatherCode)] || current.weatherDesc?.[0]?.value || '未知',
+      wind_speed_kmh: current.windspeedKmph,
+      wind_dir: current.winddir16Point,
+      pressure_mb: current.pressure,
+    }
+
+    // Parse daily forecast
+    const allDays = data.weather || []
+    const daysData = allDays.slice(0, forecastDays).map(day => {
+      const hourly = day.hourly || []
+      // Calculate max/min from hourly data for better accuracy
+      let tempMax = -99, tempMin = 99
+      let precipSum = 0
+      let windMax = 0
+      hourly.forEach(h => {
+        const t = parseFloat(h.tempC)
+        if (!isNaN(t)) {
+          if (t > tempMax) tempMax = t
+          if (t < tempMin) tempMin = t
+        }
+        precipSum += parseFloat(h.precipMM) || 0
+        const w = parseFloat(h.windspeedKmph) || 0
+        if (w > windMax) windMax = w
+      })
+      // Get the midday weather code for the day's description
+      const midday = hourly.find(h => h.time === '1200') || hourly[Math.floor(hourly.length / 2)] || hourly[0]
+      const weatherCode = midday ? (WEATHER_DESC[parseInt(midday.weatherCode)] || midday.weatherDesc?.[0]?.value || '未知') : '未知'
+      const avgHumidity = Math.round(hourly.reduce((s, h) => s + (parseInt(h.humidity) || 0), 0) / (hourly.length || 1))
+
+      return {
+        date: day.date,
+        temp_max: tempMax > -99 ? Math.round(tempMax) : parseInt(day.maxtempC) || 0,
+        temp_min: tempMin < 99 ? Math.round(tempMin) : parseInt(day.mintempC) || 0,
+        weather: weatherCode,
+        precip_total: Math.round(precipSum * 10) / 10,
+        precip_prob: Math.round(Math.min(100, precipSum * 10)),
+        wind_max: Math.round(windMax),
+        humidity: avgHumidity,
+        sunrise: day.astronomy?.[0]?.sunrise || '',
+        sunset: day.astronomy?.[0]?.sunset || '',
+      }
+    })
+
+    res.json({
+      city: cityName,
+      current: currentWeather,
+      days: daysData,
+      source: 'wttr.in (free, no API key)',
+    })
   } catch (e) {
-    res.status(500).json({ error: e.message })
+    console.error('[weather] wttr.in error:', e.message)
+    res.status(500).json({ error: '天气查询失败: ' + e.message })
   }
 })
 

@@ -130,9 +130,9 @@ function getMemoryPrompt(dir = MEMORY_DIR) {
 
 ## Current Memories:
 `
-  const typeLabels = { user: '👤 User', feedback: '📝 Feedback', project: '📁 Project', reference: '🔗 Reference' }
+  const typeLabels = { user: '[User]', feedback: '[Feedback]', project: '[Project]', reference: '[Ref]' }
   for (const f of files) {
-    const label = typeLabels[f.type] || '📄 Other'
+    const label = typeLabels[f.type] || '[File]'
     prompt += `- ${label}: **${f.name}** — ${f.description}\n`
   }
 
@@ -266,8 +266,8 @@ function updateIndex(dir, filename, name, description, type) {
   if (indexContent.includes(existingLine)) return
 
   // Add to index
-  const typeEmoji = { user: '👤', feedback: '📝', project: '📁', reference: '🔗' }
-  const emoji = typeEmoji[type] || '📄'
+  const typeEmoji = { user: '[User]', feedback: '[Feedback]', project: '[Project]', reference: '[Ref]' }
+  const emoji = typeEmoji[type] || '[File]'
   const newLine = `- ${emoji} [${name}](${filename}) — ${description}\n`
 
   indexContent += newLine

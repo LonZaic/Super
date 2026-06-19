@@ -58,6 +58,15 @@
                     </div>
                     <div v-if="showRaw" class="raw-output-body">{{ rawText }}</div>
                 </div>
+                <!-- Side Quest for design messages -->
+                <SideQuestBox
+                    v-if="!streaming"
+                    :side-quest="sideQuest"
+                    :msg-id="msgId"
+                    :loading="sideQuestLoading"
+                    @ask="(payload) => $emit('sideQuestAsk', payload)"
+                    @delete="$emit('sideQuestDelete', msgId)"
+                />
             </template>
 
             <!-- ═══ AI streaming: drawing phase ═══ -->
@@ -144,7 +153,28 @@
 
             <!-- ═══ AI normal message (with or without streaming) ═══ -->
             <template v-else-if="role === 'ai'">
+                <!-- Live SVG rendering box — real-time drawing canvas shown FIRST during streaming -->
+                <div v-if="liveSvg" class="live-svg-box">
+                    <div class="live-svg-header">
+                        <svg class="live-svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                            <path d="M7 17l4-8 3 4 3-6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span class="live-svg-label">{{ streaming ? '正在绘制...' : 'SVG 绘图' }}</span>
+                        <span v-if="streaming" class="live-svg-dot"></span>
+                    </div>
+                    <div ref="liveSvgBody" class="live-svg-body" v-html="liveSvg"></div>
+                </div>
                 <div class="bubble markdown-body" v-html="renderedText"></div>
+                <!-- Side Quest (侧边提问) — non-streaming AI replies only -->
+                <SideQuestBox
+                    v-if="role === 'ai' && !streaming && text"
+                    :side-quest="sideQuest"
+                    :msg-id="msgId"
+                    :loading="sideQuestLoading"
+                    @ask="(payload) => $emit('sideQuestAsk', payload)"
+                    @delete="$emit('sideQuestDelete', msgId)"
+                />
                 <span v-if="streaming && !text" class="stream-cursor"></span>
             </template>
 
@@ -284,12 +314,14 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { renderMarkdown } from '../utils/markdown.js'
+import { renderMarkdown, setSvgStreamingMode } from '../utils/markdown.js'
 import { loadFile } from '../utils/fileDB.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
 import { guessDeviceType, DEVICES } from '../utils/designPreview.js'
 import { useI18n } from '../composables/useI18n.js'
 import AgentProgress from './chat/AgentProgress.vue'
+import SideQuestBox from './chat/SideQuestBox.vue'
+import { animateSvgStrokes } from '../utils/svgAnimator.js'
 import { getCollections, saveItem, isItemDuplicate } from '../db/database.js'
 
 const { t } = useI18n()
@@ -313,9 +345,12 @@ const props = defineProps({
     yammyPlaying: { type: Boolean, default: false },
     yammyShaking: { type: Boolean, default: false },
     downloadFiles: { type: Array, default: () => [] },
+    liveSvg: { type: String, default: '' },
+    sideQuest: { type: Object, default: null },
+    sideQuestLoading: { type: Boolean, default: false },
 })
 
-defineEmits(['regenerate', 'edit', 'delete', 'prevBranch', 'nextBranch', 'pickDevice', 'notDesign', 'yammyClick', 'previewFile', 'askZip'])
+defineEmits(['regenerate', 'edit', 'delete', 'prevBranch', 'nextBranch', 'pickDevice', 'notDesign', 'yammyClick', 'previewFile', 'askZip', 'sideQuestAsk', 'sideQuestDelete'])
 
 // ═══ Copy feedback ═══
 const copyDone = ref(false)
@@ -698,8 +733,50 @@ watch(() => props.yammyActive, (active) => {
 
 const renderedText = computed(() => {
     if (props.role !== 'ai') return ''
+    // During streaming, render SVG blocks as code to prevent DOM flicker.
+    // After streaming, render SVGs inline with stroke animation.
+    setSvgStreamingMode(!!props.streaming)
     return renderMarkdown(props.text || '')
 })
+
+// ═══ Live SVG incremental rendering — 逐笔绘制 ═══
+const liveSvgBody = ref(null)
+let _liveSvgTimer = null  // for cleanup
+let _liveSvgVersion = 0   // track content changes for re-animation
+
+// Watch liveSvg changes — render with stroke animation via v-html + nextTick
+watch(() => props.liveSvg, async (newSvg) => {
+    if (!newSvg) return
+    await nextTick()
+    const body = liveSvgBody.value
+    if (!body) return
+    const svg = body.querySelector('svg')
+    if (!svg) return
+
+    // Increment version so each content change triggers fresh animation
+    const thisVersion = ++_liveSvgVersion
+    // Remove previous version marker to allow re-animation on content update
+    svg.removeAttribute('data-animated')
+
+    // Call the full stroke animator — draws each stroked element sequentially
+    animateSvgStrokes(svg, { duration: 2000, stagger: 120 })
+
+    // Clean up after animation completes
+    clearTimeout(_liveSvgTimer)
+    _liveSvgTimer = setTimeout(() => {
+        if (_liveSvgVersion !== thisVersion) return // newer content arrived
+        const s = body.querySelector('svg')
+        if (s) {
+            s.querySelectorAll('path, line, circle, ellipse, rect, polygon, polyline').forEach(el => {
+                el.style.transition = ''
+                el.style.strokeDasharray = ''
+                el.style.strokeDashoffset = ''
+            })
+        }
+    }, 2500)
+})
+
+onBeforeUnmount(() => { clearTimeout(_liveSvgTimer) })
 
 // ─── device helpers ───
 function deviceLabel(d) {
@@ -972,7 +1049,12 @@ async function copyText() {
     gap: 10px;
 }
 .design-frame-wrap {
-    /* no animation — avoid replay on VirtualList re-render */
+    /* Subtle entrance — fast enough that VirtualList re-render is unnoticeable */
+    animation: designReveal 0.35s ease both;
+}
+@keyframes designReveal {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* ─── device frame: simple 1px line, no notch/titlebar ─── */
@@ -1099,4 +1181,69 @@ async function copyText() {
     transition: all .15s;
 }
 .device-pick-undo:hover { border-color: var(--red); color: var(--red); }
+
+/* ═══ Live SVG rendering box — real-time drawing canvas ═══ */
+.live-svg-box {
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--bg);
+    transition: border-color 0.2s;
+    min-width: 280px;
+}
+.live-svg-box:hover {
+    border-color: var(--accent-muted);
+}
+.live-svg-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+}
+.live-svg-icon {
+    color: var(--accent);
+    flex-shrink: 0;
+}
+.live-svg-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text2);
+    letter-spacing: 0.3px;
+}
+.live-svg-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: svgDotPulse 1s ease-in-out infinite;
+}
+@keyframes svgDotPulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+.live-svg-body {
+    padding: 12px;
+    min-height: 200px;
+    max-height: 420px;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        linear-gradient(45deg, var(--bg3) 25%, transparent 25%),
+        linear-gradient(-45deg, var(--bg3) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, var(--bg3) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--bg3) 75%);
+    background-size: 12px 12px;
+    background-position: 0 0, 0 6px, 6px -6px, -6px 0px;
+    background-color: var(--bg);
+}
+.live-svg-body svg {
+    max-width: 100%;
+    max-height: 380px;
+    height: auto;
+}
+
 </style>

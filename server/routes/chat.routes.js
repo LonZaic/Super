@@ -3,7 +3,7 @@
 // ══════════════════════════════════════
 
 const { Router } = require('express')
-const { authRequired } = require('../auth')
+const { authRequired, localAuth, localLoginHandler } = require('../auth')
 const ctrl = require('../controllers/chat.controller')
 
 const router = Router()
@@ -32,25 +32,28 @@ router.get('/groups/:id', authRequired, ctrl.getGroupDetail)
 router.get('/groups/:id/messages', authRequired, ctrl.getGroupMessages)
 router.post('/groups/:id/leave', authRequired, ctrl.leaveGroup)
 
+// ═══ Local Auth Endpoint ═══
+router.post('/auth/local', localLoginHandler)
+
 // ═══ AI Chat Conversations & Messages ═══
 // NOTE: export/import must be BEFORE /:id routes to avoid path collision
 
 // Export / Import
-router.get('/conversations/export/all', authRequired, ctrl.exportData)
-router.post('/conversations/import', authRequired, ctrl.importData)
+router.get('/conversations/export/all', localAuth, ctrl.exportData)
+router.post('/conversations/import', localAuth, ctrl.importData)
 
 // Conversations
-router.get('/conversations', authRequired, ctrl.listConversations)
-router.post('/conversations', authRequired, ctrl.createConversation)
-router.get('/conversations/:id', authRequired, ctrl.getConversation)
-router.patch('/conversations/:id', authRequired, ctrl.updateConversation)
-router.delete('/conversations/:id', authRequired, ctrl.deleteConversation)
+router.get('/conversations', localAuth, ctrl.listConversations)
+router.post('/conversations', localAuth, ctrl.createConversation)
+router.get('/conversations/:id', localAuth, ctrl.getConversation)
+router.patch('/conversations/:id', localAuth, ctrl.updateConversation)
+router.delete('/conversations/:id', localAuth, ctrl.deleteConversation)
 
 // Messages within a conversation
-router.get('/conversations/:id/messages', authRequired, ctrl.listMessages)
-router.post('/conversations/:id/messages', authRequired, ctrl.addMessage)
-router.patch('/conversations/:id/messages/:msgId', authRequired, ctrl.updateMessage)
-router.delete('/conversations/:id/messages/:msgId', authRequired, ctrl.deleteMessage)
-router.post('/conversations/:id/truncate', authRequired, ctrl.truncateMessages)
+router.get('/conversations/:id/messages', localAuth, ctrl.listMessages)
+router.post('/conversations/:id/messages', localAuth, ctrl.addMessage)
+router.patch('/conversations/:id/messages/:msgId', localAuth, ctrl.updateMessage)
+router.delete('/conversations/:id/messages/:msgId', localAuth, ctrl.deleteMessage)
+router.post('/conversations/:id/truncate', localAuth, ctrl.truncateMessages)
 
 module.exports = router

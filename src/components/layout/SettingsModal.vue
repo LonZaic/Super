@@ -768,3 +768,10 @@ select.form-input { cursor: pointer; appearance: auto; padding-right: 28px; }
 .upload-msg.fail { color: var(--red); }
 .hidden-input { display: none; }
 </style>
+
+<style>
+/* Light mode — unscoped so it overrides component's scoped overlay */
+[data-theme="light"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.30) !important;
+}
+</style>

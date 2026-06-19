@@ -79,3 +79,19 @@ export async function getTask(projectPath) {
   })
   return res.json()
 }
+
+export async function createFolder(folderPath, projectPath, parentPath = '') {
+  const res = await fetch(`${BASE_URL}/api/code/create-folder`, {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ folderPath, projectPath, parentPath })
+  })
+  return res.json()
+}
+
+export async function createFile(filePath, projectPath, parentPath = '') {
+  const res = await fetch(`${BASE_URL}/api/code/create-file`, {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ filePath, projectPath, parentPath })
+  })
+  return res.json()
+}

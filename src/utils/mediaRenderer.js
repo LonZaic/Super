@@ -47,7 +47,12 @@ export function renderSvgBlock(wrap) {
     return
   }
   try {
-    wrap.innerHTML = svg
+    // Mark SVG for stroke animation (rendered immediately, animation as bonus)
+    const animated = svg.replace(
+      /<svg\b/,
+      '<svg data-animated="pending"'
+    )
+    wrap.innerHTML = animated
     wrap.setAttribute('data-rendered', 'true')
   } catch (e) {
     wrap.setAttribute('data-rendered', 'error')

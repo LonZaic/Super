@@ -10,6 +10,7 @@ html, body {
 
 body {
   background: var(--bg);
+  background-image: var(--body-bg-gradient);
   color: var(--text);
   font-family: var(--font-sans);
   font-weight: 300;
@@ -118,9 +119,15 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow-x: auto;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .svg-render-wrap svg {
   max-width: 100%;
+  min-width: 200px;
+  min-height: 100px;
   height: auto;
   display: block;
 }

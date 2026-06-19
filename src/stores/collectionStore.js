@@ -4,6 +4,9 @@ import {
   getCollections, createCollection, deleteCollection, renameCollection,
   getSavedItems, getAllSavedItems, searchSavedItems, saveItem, deleteSavedItem
 } from '../db/database.js'
+import { collectionsApi } from '../api/index.js'
+
+let _serverAvailable = true
 
 export const useCollectionStore = defineStore('collections', () => {
   const collections = ref([])
@@ -37,17 +40,26 @@ export const useCollectionStore = defineStore('collections', () => {
 
   function addCollection(name) {
     const id = createCollection(name)
+    if (_serverAvailable) {
+      collectionsApi.create(name).catch(() => { _serverAvailable = false })
+    }
     refresh()
     return id
   }
 
   function removeCollection(id) {
     deleteCollection(id)
+    if (_serverAvailable) {
+      collectionsApi.delete(id).catch(() => { _serverAvailable = false })
+    }
     refresh()
   }
 
   function editCollectionName(id, name) {
     renameCollection(id, name)
+    if (_serverAvailable) {
+      collectionsApi.rename(id, name).catch(() => { _serverAvailable = false })
+    }
     refresh()
   }
 
@@ -67,11 +79,17 @@ export const useCollectionStore = defineStore('collections', () => {
 
   function addItem(collectionId, msgData, preview) {
     saveItem(collectionId, JSON.stringify(msgData), preview)
+    if (_serverAvailable) {
+      collectionsApi.saveItem(collectionId, JSON.stringify(msgData), preview).catch(() => { _serverAvailable = false })
+    }
     refresh()
   }
 
   function removeItem(id) {
     deleteSavedItem(id)
+    if (_serverAvailable) {
+      collectionsApi.deleteItem(id).catch(() => { _serverAvailable = false })
+    }
     refresh()
   }
 

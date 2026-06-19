@@ -92,7 +92,7 @@ try {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
 }
 
 .fade-up-enter-active { animation: fadeUp .35s ease both; }

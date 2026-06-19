@@ -1,19 +1,18 @@
 <template>
   <div class="home-page">
-    <!-- Top bar with tabs -->
+    <!-- Top bar with tabs — CodeView style -->
     <div class="topbar">
       <div class="tab-bar" v-if="store.openTabs.length">
         <div
-          v-for="(tab, i) in store.openTabList"
+          v-for="tab in store.openTabList"
           :key="tab.id"
           :class="['tab', { active: tab.id === store.currentId }]"
-          :style="{ borderColor: tabColor(i) }"
           @click="switchTab(tab.id)"
         >
           <span class="tab-title">{{ tab.title || t('newChatTab') }}</span>
           <button class="tab-close" @click.prevent.stop="closeTab(tab.id)">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" pointer-events="none">
-              <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
             </svg>
           </button>
         </div>
@@ -27,8 +26,17 @@
     <div class="content" v-if="!store.currentId">
       <div class="greeting">
         <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
-          <circle cx="19" cy="19" r="17" stroke="var(--accent)" stroke-width="2"/>
-          <path d="M12 19h14M19 12v14M12 12l14 14M12 26l14-14" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round"/>
+          <!-- Orbit ring -->
+          <ellipse cx="19" cy="19" rx="16" ry="6" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" transform="rotate(-20 19 19)"/>
+          <!-- Sun -->
+          <circle cx="19" cy="19" r="5.5" fill="var(--accent)" opacity="0.1" stroke="var(--accent)" stroke-width="1.5"/>
+          <circle cx="19" cy="19" r="2" fill="var(--accent)"/>
+          <!-- Planet 1 -->
+          <circle cx="11" cy="21" r="1.5" fill="var(--accent)" opacity="0.7"/>
+          <!-- Planet 2 -->
+          <circle cx="27.5" cy="16" r="1" fill="var(--accent)" opacity="0.5"/>
+          <!-- Planet 3 (tiny, far) -->
+          <circle cx="8" cy="10" r="0.7" fill="var(--accent)" opacity="0.35"/>
         </svg>
         <span class="greeting-text">{{ greeting }}</span>
       </div>
@@ -173,9 +181,6 @@ const greeting = computed(() => {
 
 const thinkingLabel = computed(() => thinking.value === 'off' ? t('thinkOff') : t('thinkOn'))
 const modelLabel = computed(() => store.model.includes('pro') ? t('v4pro') : t('v4flash'))
-const TAB_COLORS = ['#4f7dff', '#7c5cfc', '#3fb950', '#f0883e', '#f85149', '#d2991d']
-
-function tabColor(i) { return TAB_COLORS[i % TAB_COLORS.length] }
 
 function cycleThinking() {
   thinking.value = thinking.value === 'off' ? 'on' : 'off'
@@ -336,11 +341,11 @@ onMounted(async () => {
 
 /* Top bar with tabs */
 .topbar {
-  height: 52px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 4px 8px 0;
+  background: var(--bg2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   gap: 8px;
@@ -348,7 +353,7 @@ onMounted(async () => {
 
 .tab-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 2px;
   overflow-x: auto;
   flex: 1;
@@ -359,51 +364,41 @@ onMounted(async () => {
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: var(--radius);
+  gap: 5px;
+  padding: 6px 10px 5px;
+  border-radius: 6px 6px 0 0;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text3);
   font-weight: 300;
   white-space: nowrap;
-  transition: all .15s;
+  transition: all .12s;
   flex-shrink: 0;
-  border: none;
+  border: 1px solid transparent;
+  border-bottom: none;
   background: transparent;
   font-family: inherit;
 }
-.tab::before {
-  content: '';
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--accent-muted);
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity .15s;
-}
-.tab:hover { color: var(--text2); background: rgba(255,255,255,0.03); }
-.tab:hover::before { opacity: 1; }
-.tab.active { color: var(--text); background: rgba(79,125,255,0.08); }
-.tab.active::before { opacity: 1; background: var(--accent); }
+.tab:hover { background: var(--bg3); color: var(--text2); }
+.tab.active { background: var(--bg); color: var(--text); border-color: var(--border); }
 
-.tab-title { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.tab-title { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 .tab-close {
-  width: 16px; height: 16px;
-  margin-left: 4px;
-  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; height: 14px;
+  border-radius: 3px;
   border: none;
   background: transparent;
   color: var(--text3);
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
   opacity: 0;
-  transition: opacity .1s, background .1s;
+  transition: opacity .12s, background .12s, color .12s;
 }
 .tab:hover .tab-close { opacity: 1; }
-.tab-close:hover { background: var(--bg3); color: var(--red); }
+.tab-close:hover { background: var(--bg4); color: var(--red); }
 
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 .topbar-user { font-size: 13px; color: var(--text2); font-weight: 300; }

@@ -12,6 +12,9 @@ import {
   updateAgentConversationTitle,
   deleteAgentConversation,
 } from '../db/database.js'
+import { agentConversations as agentApi } from '../api/index.js'
+
+let _serverAvailable = true
 
 export const useAgentConversationStore = defineStore('agentConversation', {
   state: () => ({
@@ -44,6 +47,9 @@ export const useAgentConversationStore = defineStore('agentConversation', {
     async createConversation(title) {
       const id = 'ag_' + Date.now()
       dbCreate(id, title || 'Agent 对话')
+      if (_serverAvailable) {
+        agentApi.create(id, title || 'Agent 对话').catch(() => { _serverAvailable = false })
+      }
       this.conversations = getAgentConversations()
       this.currentId = id
       this.messagesMap[id] = []
@@ -118,44 +124,57 @@ export const useAgentConversationStore = defineStore('agentConversation', {
     addUserMessage(text) {
       if (!this.currentId) return -1
       addAgentMessage(this.currentId, 'user', text, '[]')
+      if (_serverAvailable) {
+        agentApi.addMessage(this.currentId, { role: 'user', text, events: '[]' }).catch(() => { _serverAvailable = false })
+      }
       const rows = getAgentMessages(this.currentId)
       const last = rows[rows.length - 1]
       return last ? last.id : -1
     },
 
-    // ─── Add agent progress message ───
     addProgressMessage(events) {
       if (!this.currentId) return -1
       addAgentMessage(this.currentId, 'agent-progress', '', JSON.stringify(events || []))
+      if (_serverAvailable) {
+        agentApi.addMessage(this.currentId, { role: 'agent-progress', text: '', events: JSON.stringify(events || []) }).catch(() => { _serverAvailable = false })
+      }
       const rows = getAgentMessages(this.currentId)
       const last = rows[rows.length - 1]
       return last ? last.id : -1
     },
 
-    // ─── Add AI reply ───
     addAiMessage(text) {
       if (!this.currentId) return -1
       addAgentMessage(this.currentId, 'ai', text, '[]')
+      if (_serverAvailable) {
+        agentApi.addMessage(this.currentId, { role: 'ai', text, events: '[]' }).catch(() => { _serverAvailable = false })
+      }
       const rows = getAgentMessages(this.currentId)
       const last = rows[rows.length - 1]
       return last ? last.id : -1
     },
 
-    // ─── Update message in DB ───
     updateMessageText(dbId, text, events) {
       if (!dbId || dbId < 0) return
       updateAgentMessage(dbId, text, events || '[]')
+      if (_serverAvailable) {
+        agentApi.updateMessage(this.currentId, dbId, { text, events: events || '[]' }).catch(() => { _serverAvailable = false })
+      }
     },
 
-    // ─── Rename ───
     renameConversation(id, title) {
       updateAgentConversationTitle(id, title)
+      if (_serverAvailable) {
+        agentApi.update(id, { title }).catch(() => { _serverAvailable = false })
+      }
       this.conversations = getAgentConversations()
     },
 
-    // ─── Delete ───
     deleteConversation(id) {
       deleteAgentConversation(id)
+      if (_serverAvailable) {
+        agentApi.delete(id).catch(() => { _serverAvailable = false })
+      }
       this.conversations = getAgentConversations()
       delete this.messagesMap[id]
       this.openTabs = this.openTabs.filter(t => t !== id)
