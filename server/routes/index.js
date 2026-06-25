@@ -1,8 +1,20 @@
 // ══════════════════════════════════════
 // Route Aggregator — mount all route modules
 // ══════════════════════════════════════
+//
+// Auth strategy (#3/#4 fix):
+//   - /api/auth/*           → public (register/login/local)
+//   - /api/weather/*        → public (free public data)
+//   - /api/health           → public (already mounted in app.js)
+//   - chat & data routes    → already apply authRequired/localAuth internally
+//   - ALL other routes      → authRequired middleware applied at mount point
+//
+// This closes the critical hole where 9 route groups (ai/code/computer/
+// files/mcp/skills/knowledge/workflow/inbox/ds/image-library/novel/agent/
+// memory/search) were exposed without any authentication.
 
 const { Router } = require('express')
+const { authRequired } = require('../auth')
 
 const authRoutes = require('./auth.routes')
 const chatRoutes = require('./chat.routes')
@@ -26,24 +38,31 @@ const novelRoutes = require('./novel.routes')
 
 const router = Router()
 
+// ─── Public routes (no auth) ───
 router.use('/api/auth', authRoutes)
+router.use('/api/weather', weatherRoutes)
+
+// ─── Chat & data routes (apply auth internally via localAuth/authRequired) ───
+// Note: /api/auth/local (localLoginHandler) is the only public endpoint
+// inside chatRoutes; everything else there is already guarded.
 router.use('/api', chatRoutes)
-router.use('/api/ai', aiRoutes)
-router.use('/api/agent', agentRoutes)
-router.use('/api/agent', memoryRoutes)
-router.use('/api', codeRoutes)
 router.use('/api', dataRoutes)
-router.use('/api', searchRoutes)
-router.use('/api', weatherRoutes)
-router.use('/api', filesRoutes)
-router.use('/api', computerRoutes)
-router.use('/api/mcp', mcpRoutes)
-router.use('/api/skills', skillsRoutes)
-router.use('/api/knowledge', knowledgeRoutes)
-router.use('/api/workflows', workflowRoutes)
-router.use('/api/inbox', inboxRoutes)
-router.use('/api/ds', dsRoutes)
-router.use('/api/image-library', imageLibraryRoutes)
-router.use('/api/novels', novelRoutes)
+
+// ─── Protected routes (authRequired at mount point) ───
+router.use('/api/ai', authRequired, aiRoutes)
+router.use('/api/agent', authRequired, agentRoutes)
+router.use('/api/agent', authRequired, memoryRoutes)
+router.use('/api', authRequired, codeRoutes)
+router.use('/api', authRequired, searchRoutes)
+router.use('/api', authRequired, filesRoutes)
+router.use('/api', authRequired, computerRoutes)
+router.use('/api/mcp', authRequired, mcpRoutes)
+router.use('/api/skills', authRequired, skillsRoutes)
+router.use('/api/knowledge', authRequired, knowledgeRoutes)
+router.use('/api/workflows', authRequired, workflowRoutes)
+router.use('/api/inbox', authRequired, inboxRoutes)
+router.use('/api/ds', authRequired, dsRoutes)
+router.use('/api/image-library', authRequired, imageLibraryRoutes)
+router.use('/api/novels', authRequired, novelRoutes)
 
 module.exports = router

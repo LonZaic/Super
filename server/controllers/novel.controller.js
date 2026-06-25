@@ -5,7 +5,7 @@
 const { v4: uuid } = require('uuid')
 const { novel } = require('../db')
 const config = require('../config')
-const { sendSuccess, sendError } = require('../middleware/errorHandler')
+const { sendSuccess, sendError } = require('../errorHandler')
 const { broadcastNovelEvent } = require('../ws')
 
 // ─── Novel CRUD ───

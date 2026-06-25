@@ -3,7 +3,7 @@
 // Chat mode now supports web search: model can call web_search, server executes it
 // ══════════════════════════════════════
 
-const { sendSuccess, sendError } = require('../middleware/errorHandler')
+const { sendSuccess, sendError } = require('../errorHandler')
 const { DEEPSEEK_API_BASE } = require('../config/constants')
 const config = require('../config')
 const { webSearchVerified } = require('../search')
@@ -258,7 +258,12 @@ async function streamWithToolHandling(messages, model, providedTools, apiKey, re
       }
       currentMessages.push({
         role: 'tool',
-        tool_call_id: tc.id || ('call_' + Object.keys(toolCallAccum).indexOf(tc.id?.toString() || '0')),
+        // (#11 fix) tool_call_id must match the id the AI used when it
+        // emitted the tool_call. Previously this used indexOf(tc.id) over
+        // toolCallAccum's keys — but those keys are numeric indices, not
+        // ids, so it always returned -1. Use tc.id directly, or fall back
+        // to a deterministic 'call_<index>' only if id is missing.
+        tool_call_id: tc.id || ('call_' + (tc.index ?? 0)),
         content: result
       })
       // Send tool result to client

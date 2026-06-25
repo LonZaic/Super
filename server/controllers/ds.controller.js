@@ -4,7 +4,7 @@
 
 const config = require('../config')
 const { dsAgent, dsTask, dsMemory, dsSchedule, room } = require('../db')
-const { sendSuccess, sendError } = require('../middleware/errorHandler')
+const { sendSuccess, sendError } = require('../errorHandler')
 const { getTemplate, listTemplates, getIcon, genAgentId, parseMentions } = require('../engine/dsRegistry')
 const { runDsTask, runParallelDsTasks, ambientCheck, interAgentMessage, quickReply, abortTask, abortAgentTasks, getRoomAgentsStatus, getRoomContextStats, getAgentStatus, sendDsMessage } = require('../engine/dsAgent')
 

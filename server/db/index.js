@@ -1,7 +1,23 @@
 const Database = require('better-sqlite3')
 const path = require('path')
+const fs = require('fs')
 
-const DB_PATH = path.join(__dirname, '..', 'bbot.db')
+// ══════════════════════════════════════
+// DB_PATH resolution — honors env var, falls back to a writable location
+// ══════════════════════════════════════
+function resolveDbPath() {
+  // 1. Explicit env var (Docker / Electron / CLI)
+  if (process.env.DB_PATH) {
+    const p = path.resolve(process.env.DB_PATH)
+    const dir = path.dirname(p)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    return p
+  }
+  // 2. Default: next to server/ directory (legacy location for backwards compat)
+  return path.join(__dirname, '..', 'bbot.db')
+}
+
+const DB_PATH = resolveDbPath()
 const db = new Database(DB_PATH)
 
 // Enable WAL mode for better concurrent performance
@@ -292,12 +308,19 @@ try { db.exec('ALTER TABLE messages ADD COLUMN side_quest TEXT DEFAULT \'\'') } 
 try { db.exec('ALTER TABLE conversations ADD COLUMN folder_id TEXT') } catch {}
 try { db.exec('ALTER TABLE conversations ADD COLUMN sort_order INTEGER DEFAULT 0') } catch {}
 try { db.exec('ALTER TABLE room_messages ADD COLUMN sender_name TEXT') } catch {}
+// Auth: add password_hash column (bcrypt). Old plaintext `password` column kept for one-time migration only.
+try { db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT') } catch {}
+// Add token_expires column for token expiry (#14)
+try { db.exec('ALTER TABLE users ADD COLUMN token_expires TEXT') } catch {}
 
 // ─── User queries ───
+// NOTE: `password_hash` (bcrypt) is the canonical credential. The legacy
+// `password` column is kept ONLY for one-time migration of pre-bcrypt users.
 const user = {
-  create(id, name, password) {
-    const stmt = db.prepare('INSERT INTO users (id, name, password) VALUES (?, ?, ?)')
-    return stmt.run(id, name, password)
+  create(id, name, passwordHash) {
+    const stmt = db.prepare('INSERT INTO users (id, name, password, password_hash) VALUES (?, ?, ?, ?)')
+    // legacy `password` column is NOT NULL in schema; store empty string, real hash lives in password_hash
+    return stmt.run(id, name, '', passwordHash)
   },
   findByName(name) {
     return db.prepare('SELECT * FROM users WHERE name = ?').get(name)
@@ -306,16 +329,32 @@ const user = {
     return db.prepare('SELECT id, name, status, created_at FROM users WHERE id = ?').get(id)
   },
   findByToken(token) {
-    return db.prepare('SELECT * FROM users WHERE token = ?').get(token)
+    if (!token) return null
+    const u = db.prepare('SELECT * FROM users WHERE token = ?').get(token)
+    if (!u) return null
+    // Token expiry check (#14): tokens expire after 30 days of issue
+    if (u.token_expires) {
+      const exp = new Date(u.token_expires).getTime()
+      if (Date.now() > exp) return null
+    }
+    return u
   },
-  setToken(id, token) {
-    db.prepare('UPDATE users SET token = ? WHERE id = ?').run(token, id)
+  setToken(id, token, expiresAt) {
+    db.prepare('UPDATE users SET token = ?, token_expires = ? WHERE id = ?').run(token, expiresAt || null, id)
   },
   setStatus(id, status) {
     db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, id)
   },
   setAllOffline() {
-    db.prepare("UPDATE users SET status = 'offline', token = NULL").run()
+    // NOTE: do NOT clear tokens on restart — that would log everyone out.
+    // Tokens have their own expiry now (#14).
+    db.prepare("UPDATE users SET status = 'offline'").run()
+  },
+  setPasswordHash(id, hash) {
+    db.prepare('UPDATE users SET password_hash = ?, password = \'\' WHERE id = ?').run(hash, id)
+  },
+  count() {
+    return db.prepare('SELECT COUNT(*) as n FROM users').get().n
   },
   searchByName(name, excludeId) {
     return db.prepare('SELECT id, name, status FROM users WHERE name LIKE ? AND id != ? LIMIT 20').all('%' + name + '%', excludeId)

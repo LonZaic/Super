@@ -8,14 +8,16 @@ const createApp = require('./app')
 const config = require('./config')
 const logger = require('./config/logger')
 const { user } = require('./db')
-const { ensureLocalUser } = require('./auth')
+const { migrateLegacyPasswords } = require('./auth')
 const { ensureMemDir, MEMORY_DIR } = require('./engine/memory')
 const { startScheduler } = require('./engine/dsSchedule')
 const { setupWebSocket } = require('./ws')
 
-// Ensure memory directory and local user on startup
+// Ensure memory directory exists
 ensureMemDir(MEMORY_DIR)
-ensureLocalUser()
+
+// One-time migration: hash any legacy plaintext passwords in the DB
+migrateLegacyPasswords()
 
 // Create Express app
 const app = createApp()

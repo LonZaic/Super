@@ -9,6 +9,7 @@ const os = require('os')
 const { executeCodeTask } = require('../codeAgent')
 const { initFollow, readFollow, searchFollowBM25 } = require('../followManager')
 const { initTask, readTask } = require('../taskManager')
+const { validateFilePath } = require('../pathSanitizer')
 
 const router = Router()
 const WORKSPACE = process.env.AGENT_WORKSPACE || os.homedir()
@@ -18,8 +19,10 @@ router.post('/code/filetree', (req, res) => {
   try {
     const { projectPath } = req.body
     const dir = projectPath || WORKSPACE
-    if (!fs.existsSync(dir)) return res.json({ tree: [], error: 'Path not found' })
-    const tree = scanDir(dir, 3)
+    const v = validateFilePath(dir)
+    if (!v.ok) return res.status(403).json({ error: v.error })
+    if (!fs.existsSync(v.resolved)) return res.json({ tree: [], error: 'Path not found' })
+    const tree = scanDir(v.resolved, 3)
     res.json({ tree })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -31,9 +34,10 @@ router.post('/code/read-file', (req, res) => {
   try {
     let { filePath, projectPath } = req.body
     // Resolve relative paths against project root if provided
-    if (projectPath && !path.isAbsolute(filePath)) {
-      filePath = path.resolve(projectPath, filePath)
-    }
+    const base = projectPath || undefined
+    const v = validateFilePath(filePath, base)
+    if (!v.ok) return res.status(403).json({ error: v.error })
+    filePath = v.resolved
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found: ' + filePath })
     const content = fs.readFileSync(filePath, 'utf-8')
     const name = path.basename(filePath)
@@ -48,11 +52,12 @@ router.post('/code/write-file', (req, res) => {
   try {
     const { filePath, content } = req.body
     if (!filePath) return res.status(400).json({ error: 'filePath required' })
-    const fs = require('fs')
-    const path = require('path')
-    const dir = path.dirname(filePath)
+    const v = validateFilePath(filePath)
+    if (!v.ok) return res.status(403).json({ error: v.error })
+    const fullPath = v.resolved
+    const dir = path.dirname(fullPath)
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(filePath, content, 'utf-8')
+    fs.writeFileSync(fullPath, content, 'utf-8')
     res.json({ ok: true })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -72,7 +77,9 @@ router.post('/code/create-folder', (req, res) => {
     if (parentPath && folderPath && !folderPath.includes(path.sep)) {
       fullPath = path.resolve(parentPath, folderPath)
     }
-    if (!fullPath) return res.status(400).json({ error: 'folderPath required' })
+    const v = validateFilePath(fullPath)
+    if (!v.ok) return res.status(403).json({ error: v.error })
+    fullPath = v.resolved
     if (!fs.existsSync(fullPath)) fs.mkdirSync(fullPath, { recursive: true })
     const tree = scanDir(path.dirname(fullPath), 3)
     res.json({ ok: true, path: fullPath, name: path.basename(fullPath), tree })
@@ -92,7 +99,9 @@ router.post('/code/create-file', (req, res) => {
     if (parentPath && filePath && !filePath.includes(path.sep)) {
       fullPath = path.resolve(parentPath, filePath)
     }
-    if (!fullPath) return res.status(400).json({ error: 'filePath required' })
+    const v = validateFilePath(fullPath)
+    if (!v.ok) return res.status(403).json({ error: v.error })
+    fullPath = v.resolved
     const dir = path.dirname(fullPath)
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
     // Don't overwrite existing files
@@ -111,11 +120,14 @@ router.post('/code/new-project', (req, res) => {
   try {
     const { projectPath, projectName } = req.body
     const fullPath = projectPath || path.join(WORKSPACE, projectName || 'NewProject')
-    if (!fs.existsSync(fullPath)) fs.mkdirSync(fullPath, { recursive: true })
-    initFollow(fullPath)
-    initTask(fullPath)
-    const tree = scanDir(fullPath, 2)
-    res.json({ projectPath: fullPath, projectName: path.basename(fullPath), tree })
+    const v = validateFilePath(fullPath)
+    if (!v.ok) return res.status(403).json({ error: v.error })
+    const resolved = v.resolved
+    if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true })
+    initFollow(resolved)
+    initTask(resolved)
+    const tree = scanDir(resolved, 2)
+    res.json({ projectPath: resolved, projectName: path.basename(resolved), tree })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }

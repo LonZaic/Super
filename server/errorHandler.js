@@ -3,7 +3,7 @@
 // Catches all unhandled errors and returns unified response format
 // ══════════════════════════════════════
 
-const logger = require('../config/logger')
+const logger = require('./config/logger')
 
 /**
  * Unified error response:

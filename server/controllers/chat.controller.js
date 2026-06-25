@@ -4,7 +4,7 @@
 
 const { v4: uuid } = require('uuid')
 const { user, friend, dm, room, conv } = require('../db')
-const { sendSuccess, sendError } = require('../middleware/errorHandler')
+const { sendSuccess, sendError } = require('../errorHandler')
 
 // ─── Users ───
 

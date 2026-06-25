@@ -5,7 +5,7 @@
 const config = require('../config')
 const { runAgent, cleanWorkspace } = require('../engine/agent')
 const { broadcastAgentEvent, broadcastAgentResult } = require('../ws')
-const { sendSuccess, sendError } = require('../middleware/errorHandler')
+const { sendSuccess, sendError } = require('../errorHandler')
 
 function run(req, res) {
   const { task, model } = req.body

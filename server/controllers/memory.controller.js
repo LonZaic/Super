@@ -3,7 +3,7 @@
 // ══════════════════════════════════════
 
 const { scanMemoryFiles, saveMemory, deleteMemory, MEMORY_DIR } = require('../engine/memory')
-const { sendSuccess, sendError } = require('../middleware/errorHandler')
+const { sendSuccess, sendError } = require('../errorHandler')
 
 function list(req, res) {
   try {

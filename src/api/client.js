@@ -14,13 +14,16 @@ const client = axios.create({
   },
 })
 
-// ─── Request interceptor: attach API key from localStorage ───
+// ─── Request interceptor: attach API key & auth token from localStorage ───
+// NOTE (#8 fix): previously read 'ds_api_key' / 'ds_token', which were never
+// written anywhere — login writes 'bbot_token', settings write 'apikey'.
+// Now aligned with the rest of the app.
 client.interceptors.request.use(config => {
-  const apiKey = localStorage.getItem('ds_api_key')
+  const apiKey = localStorage.getItem('apikey')
   if (apiKey) {
     config.headers['x-api-key'] = apiKey
   }
-  const token = localStorage.getItem('ds_token')
+  const token = localStorage.getItem('bbot_token')
   if (token) {
     config.headers['Authorization'] = `Bearer ${token}`
   }

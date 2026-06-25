@@ -2,7 +2,7 @@
 // Simple In-Memory Rate Limiter
 // ══════════════════════════════════════
 
-const config = require('../config')
+const config = require('./config')
 
 const requestCounts = new Map()
 

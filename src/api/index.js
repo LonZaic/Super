@@ -458,7 +458,10 @@ export const localAuth = {
 }
 
 export function isLoggedIn() {
-  return !!getToken() || !!(localStorage.getItem('apikey'))
+  // (#17 fix) apikey is an API key for the upstream model provider, NOT an
+  // auth token — having an apikey set does not mean the user is logged in.
+  // Only the JWT token (bbot_token) proves authentication.
+  return !!getToken()
 }
 
 export function logout() {

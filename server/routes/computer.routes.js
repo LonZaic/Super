@@ -106,6 +106,7 @@ router.post('/computer/list-dir', (req, res) => {
   try {
     let { dirPath, depth = 2 } = req.body
     if (!dirPath) dirPath = os.homedir()
+    if (isForbiddenPath(dirPath)) return res.status(403).json({ error: '禁止访问系统关键路径' })
     if (!fs.existsSync(dirPath)) return res.status(404).json({ error: '路径不存在: ' + dirPath })
     if (!fs.statSync(dirPath).isDirectory()) return res.status(400).json({ error: '不是文件夹' })
     const tree = scanDir(dirPath, Math.min(depth, 4))
@@ -217,6 +218,7 @@ router.post('/computer/search-files', (req, res) => {
   try {
     const { query, searchPath, fileTypes } = req.body
     if (!query) return res.status(400).json({ error: '请提供搜索关键词' })
+    if (searchPath && isForbiddenPath(searchPath)) return res.status(403).json({ error: '禁止搜索系统关键路径' })
 
     const lowerQ = query.toLowerCase()
     const results = []
@@ -314,6 +316,7 @@ router.post('/computer/file-stats', (req, res) => {
 
     const stats = []
     for (const fp of filePaths.slice(0, 20)) {
+      if (isForbiddenPath(fp)) { stats.push({ path: fp, exists: false, error: '禁止访问' }); continue }
       try {
         if (!fs.existsSync(fp)) { stats.push({ path: fp, exists: false }); continue }
         const stat = fs.statSync(fp)
@@ -337,6 +340,7 @@ router.post('/computer/file-stats', (req, res) => {
 router.post('/computer/analyze-disk', (req, res) => {
   try {
     const scanPath = req.body.scanPath || os.homedir()
+    if (isForbiddenPath(scanPath)) return res.status(403).json({ error: '禁止分析系统关键路径' })
     if (!fs.existsSync(scanPath)) return res.status(404).json({ error: '路径不存在' })
 
     const largeFiles = [], tempFiles = []

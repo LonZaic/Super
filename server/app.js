@@ -8,15 +8,20 @@ const fs = require('fs')
 const express = require('express')
 const cors = require('cors')
 const logger = require('./config/logger')
-const { errorHandler } = require('./middleware/errorHandler')
-const rateLimiter = require('./middleware/rateLimiter')
+const { errorHandler } = require('./errorHandler')
+const rateLimiter = require('./rateLimiter')
 const routes = require('./routes/index')
 
 function createApp() {
   const app = express()
 
   // ─── Core middleware ───
-  app.use(cors())
+  // CORS (#9 fix): restrict to configured origins instead of wildcard.
+  // Default allows localhost for dev; production should set CORS_ORIGIN.
+  const corsOrigin = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+    : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173', 'http://127.0.0.1:5173', 'app://']
+  app.use(cors({ origin: corsOrigin, credentials: true }))
   app.use(express.json({ limit: '10mb' }))
 
   // ─── Request logging ───

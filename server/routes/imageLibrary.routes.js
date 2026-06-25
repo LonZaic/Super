@@ -6,7 +6,7 @@
 // pick the best match and inject them into the chat via _imageGallery.
 
 const { Router } = require('express')
-const { sendSuccess, sendError } = require('../middleware/errorHandler')
+const { sendSuccess, sendError } = require('../errorHandler')
 
 const router = Router()
 

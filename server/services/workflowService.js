@@ -11,6 +11,7 @@ const path = require('path')
 const Database = require('better-sqlite3')
 const https = require('https')
 const http = require('http')
+const serverConfig = require('../config')
 
 const DB_PATH = path.join(__dirname, '..', 'db', 'workflows.sqlite')
 let _db = null
@@ -195,7 +196,7 @@ function substituteVars(text, context) {
 // Node executors
 // ═══════════════════════════════════════════════════════════════════════
 
-async function executeNode(node, inputs, context, runId, apiKey) {
+async function executeNode(node, inputs, context, runId, apiKey, token) {
   const config = node.config || {}
   const log = (msg) => {
     try {
@@ -228,12 +229,12 @@ async function executeNode(node, inputs, context, runId, apiKey) {
       const inputText = inputs.text || ''
       const model = config.model || 'deepseek-chat'
       log(`AI 处理: ${prompt.slice(0, 50)}...`)
-      const res = await fetch('http://localhost:3000/api/ai/chat', {
+      const res = await fetch('http://localhost:' + serverConfig.port + '/api/ai/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': apiKey || '',
-          'Authorization': 'Bearer ' + (global._workflowToken || ''),
+          'Authorization': 'Bearer ' + (token || ''),
         },
         body: JSON.stringify({
           model,
@@ -252,7 +253,7 @@ async function executeNode(node, inputs, context, runId, apiKey) {
     case 'web_search': {
       const query = inputs.query || ''
       log(`搜索: ${query}`)
-      const res = await fetch('http://localhost:3000/api/search/dual', {
+      const res = await fetch('http://localhost:' + serverConfig.port + '/api/search/dual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey || '' },
         body: JSON.stringify({ query }),
@@ -269,7 +270,7 @@ async function executeNode(node, inputs, context, runId, apiKey) {
       log(`抓取: ${url}`)
       const isCodeHost = /github\.com|gitee\.com|gitlab\.com/i.test(url)
       const endpoint = isCodeHost ? 'deep-crawl' : 'direct-crawl'
-      const res = await fetch(`http://localhost:3000/api/search/${endpoint}`, {
+      const res = await fetch(`http://localhost:' + serverConfig.port + '/api/search/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey || '' },
         body: JSON.stringify({ url }),
@@ -282,7 +283,7 @@ async function executeNode(node, inputs, context, runId, apiKey) {
     case 'get_weather': {
       const city = inputs.city || ''
       log(`天气: ${city}`)
-      const res = await fetch(`http://localhost:3000/api/weather?city=${encodeURIComponent(city)}&days=3`, {
+      const res = await fetch(`http://localhost:' + serverConfig.port + '/api/weather?city=${encodeURIComponent(city)}&days=3`, {
         headers: { 'x-api-key': apiKey || '' },
       })
       const data = await res.json()
@@ -309,7 +310,7 @@ async function executeNode(node, inputs, context, runId, apiKey) {
       const filename = inputs.filename || `workflow_${Date.now()}.txt`
       const content = inputs.content || ''
       log(`保存文件: ${filename}`)
-      const res = await fetch('http://localhost:3000/api/files/save', {
+      const res = await fetch('http://localhost:' + serverConfig.port + '/api/files/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey || '' },
         body: JSON.stringify({ filename, content, base64: false }),
@@ -392,7 +393,9 @@ async function executeNode(node, inputs, context, runId, apiKey) {
 async function executeWorkflow(workflow, inputs, apiKey, token) {
   const db = getDB()
   const runId = 'run_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
-  global._workflowToken = token || ''
+  // NOTE: token is passed to executeNode as a parameter — NOT stored globally.
+  // The previous global._workflowToken caused a race condition when two
+  // workflows ran concurrently (they'd overwrite each other's token).
 
   db.prepare(`INSERT INTO workflow_runs (id, workflow_id, status, inputs, outputs, logs) VALUES (?, ?, 'running', ?, '{}', '[]')`)
     .run(runId, workflow.id, JSON.stringify(inputs || {}))
@@ -440,7 +443,7 @@ async function executeWorkflow(workflow, inputs, apiKey, token) {
       }
 
       // Execute node
-      const output = await executeNode(node, nodeInputs, context, runId, apiKey)
+      const output = await executeNode(node, nodeInputs, context, runId, apiKey, token)
       context[node.id] = output
 
       // Find next nodes

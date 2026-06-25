@@ -80,21 +80,16 @@ const router = createRouter({
   routes
 })
 
-// Auth guard — redirect to login if not authenticated for social routes
+// Auth guard (#16 fix): previously only protected social routes. Now all
+// routes except the explicit public ones require an auth token.
 router.beforeEach((to, from, next) => {
   const publicRoutes = ['/', '/login']
-  const socialRoutes = ['/social', '/friends', '/groups']
-  const socialPrefixes = ['/dm/', '/group/']
+  if (publicRoutes.includes(to.path)) return next()
 
-  const isSocial = socialRoutes.includes(to.path) ||
-    socialPrefixes.some(p => to.path.startsWith(p))
-
-  if (isSocial) {
-    const token = localStorage.getItem('bbot_token')
-    if (!token) {
-      next('/login')
-      return
-    }
+  const token = localStorage.getItem('bbot_token')
+  if (!token) {
+    next('/login')
+    return
   }
   next()
 })
