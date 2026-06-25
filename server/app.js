@@ -25,6 +25,11 @@ function createApp() {
   // ─── Rate limiting ───
   app.use(rateLimiter)
 
+  // ─── Health check endpoint (for Docker, Render, Vercel) ───
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  })
+
   // ─── Mount all API routes ───
   app.use(routes)
 

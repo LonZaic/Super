@@ -225,6 +225,12 @@ export const conversations = {
       body: JSON.stringify({ title })
     })
   },
+  moveToFolder(id, folderId) {
+    return request('/conversations/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ folderId })
+    })
+  },
   delete(id) {
     return request('/conversations/' + id, { method: 'DELETE' })
   },
@@ -470,4 +476,170 @@ export function getSavedUser() {
     const raw = localStorage.getItem('bbot_user')
     return raw ? JSON.parse(raw) : null
   } catch { return null }
+}
+
+// ═══════════════════════════════════════════
+// Novels — AI-written novels with chapters & pages
+// ═══════════════════════════════════════════
+export const novels = {
+  list() {
+    return request('/novels')
+  },
+  get(id) {
+    return request('/novels/' + id)
+  },
+  create(data) {
+    return request('/novels', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  },
+  update(id, data) {
+    return request('/novels/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+  delete(id) {
+    return request('/novels/' + id, { method: 'DELETE' })
+  },
+  listChapters(novelId) {
+    return request('/novels/' + novelId + '/chapters')
+  },
+  createChapter(novelId, data) {
+    return request('/novels/' + novelId + '/chapters', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  },
+  updateChapter(id, data) {
+    return request('/novels/chapters/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+  deleteChapter(id) {
+    return request('/novels/chapters/' + id, { method: 'DELETE' })
+  },
+  listPages(chapterId) {
+    return request('/novels/chapters/' + chapterId + '/pages')
+  },
+  /**
+   * Generate novel via SSE stream.
+   * @param {string} novelId
+   * @param {object} opts { chapters, wordsPerChapter, model, prompt }
+   * @param {function} onEvent callback(event)
+   * @param {AbortSignal} signal
+   */
+  async generate(novelId, opts, onEvent, signal) {
+    const token = getToken()
+    const res = await fetch(BASE + '/novels/' + novelId + '/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      },
+      body: JSON.stringify(opts || {}),
+      signal,
+    })
+    if (!res.ok) throw new Error('生成失败: ' + res.status)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        const t = line.trim()
+        if (t.startsWith('data:')) {
+          try { onEvent(JSON.parse(t.slice(5).trim())) } catch {}
+        }
+      }
+    }
+  },
+}
+
+// ═══════════════════════════════════════════
+// DS Agents — Multi-agent group chat
+// ═══════════════════════════════════════════
+export const dsAgents = {
+  templates() {
+    return request('/ds/templates')
+  },
+  listByRoom(roomId) {
+    return request('/ds/rooms/' + roomId + '/agents')
+  },
+  roomStatus(roomId) {
+    return request('/ds/rooms/' + roomId + '/status')
+  },
+  create(roomId, data) {
+    return request('/ds/rooms/' + roomId + '/agents', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  },
+  routeMessage(roomId, text, triggeredBy) {
+    return request('/ds/rooms/' + roomId + '/route', {
+      method: 'POST',
+      body: JSON.stringify({ text, triggeredBy })
+    })
+  },
+  roomTasks(roomId) {
+    return request('/ds/rooms/' + roomId + '/tasks')
+  },
+  getMemory(roomId) {
+    return request('/ds/rooms/' + roomId + '/memory')
+  },
+  setMemory(roomId, key, value, agentId) {
+    return request('/ds/rooms/' + roomId + '/memory', {
+      method: 'POST',
+      body: JSON.stringify({ key, value, agentId })
+    })
+  },
+  agentDetail(agentId) {
+    return request('/ds/agents/' + agentId)
+  },
+  updateAgent(agentId, data) {
+    return request('/ds/agents/' + agentId, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    })
+  },
+  deleteAgent(agentId) {
+    return request('/ds/agents/' + agentId, { method: 'DELETE' })
+  },
+  triggerTask(agentId, task, triggeredBy) {
+    return request('/ds/agents/' + agentId + '/task', {
+      method: 'POST',
+      body: JSON.stringify({ task, triggeredBy })
+    })
+  },
+  agentTasks(agentId) {
+    return request('/ds/agents/' + agentId + '/tasks')
+  },
+  taskProgress(taskId) {
+    return request('/ds/tasks/' + taskId + '/progress')
+  },
+  abortTask(taskId) {
+    return request('/ds/tasks/' + taskId + '/abort', { method: 'POST' })
+  },
+  abortAgent(agentId) {
+    return request('/ds/agents/' + agentId + '/abort', { method: 'POST' })
+  },
+  // ─── 定时任务 ───
+  listSchedules(roomId) {
+    return request('/ds/rooms/' + roomId + '/schedules')
+  },
+  addSchedule(roomId, data) {
+    return request('/ds/rooms/' + roomId + '/schedules', { method: 'POST', body: JSON.stringify(data) })
+  },
+  deleteSchedule(scheduleId) {
+    return request('/ds/schedules/' + scheduleId, { method: 'DELETE' })
+  },
+  deleteMemory(memoryId) {
+    return request('/ds/memory/' + memoryId, { method: 'DELETE' })
+  },
 }

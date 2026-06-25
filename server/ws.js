@@ -62,13 +62,14 @@ function setupWebSocket(server) {
         case 'group_msg': {
           if (!userId) return
           const { roomId, text, isAi } = msg
-          room.sendMessage(roomId, isAi ? null : userId, text, isAi || false)
-          const members = room.getMembers(roomId)
           const sender = user.findById(userId)
+          const senderName = isAi ? 'DS' : (sender?.name || '未知')
+          room.sendMessage(roomId, isAi ? null : userId, text, isAi || false, senderName)
+          const members = room.getMembers(roomId)
           const message = {
             room_id: roomId,
             sender_id: isAi ? null : userId,
-            sender_name: isAi ? 'DS' : (sender?.name || '未知'),
+            sender_name: senderName,
             text,
             is_ai: isAi ? 1 : 0,
             created_at: new Date().toISOString()
@@ -120,6 +121,33 @@ function setupWebSocket(server) {
               }
             }
           }
+          break
+        }
+
+        case 'ds_route': {
+          // Route a message with @mentions to DS agents
+          if (!userId) return
+          const { roomId: rId, text, triggeredBy } = msg
+          if (!rId || !text) return
+          // Import here to avoid circular dependency
+          const { routeMessage } = require('./controllers/ds.controller')
+          // Create a mock req/res for the controller
+          const mockReq = {
+            params: { roomId: rId },
+            body: { text, triggeredBy },
+            headers: {},
+          }
+          const mockRes = {
+            status: () => mockRes,
+            json: (body) => {
+              // sendSuccess wraps as { success, data }
+              const payload = body && body.success ? body.data : body
+              if (payload && payload.triggered && payload.triggered.length > 0) {
+                broadcastToRoom(rId, { type: 'ds_routed', roomId: rId, triggered: payload.triggered })
+              }
+            },
+          }
+          routeMessage(mockReq, mockRes)
           break
         }
       }
@@ -180,6 +208,11 @@ function broadcastAgentResult(roomId, result) {
   broadcastToRoom(roomId, { type: 'agent_done', roomId, result })
 }
 
+// Broadcast novel generation progress to the user (so other tabs see it)
+function broadcastNovelEvent(userId, event) {
+  broadcastToUser(userId, { type: 'novel_progress', event })
+}
+
 function broadcastFriendStatus(userId, status) {
   const friends = friend.getList(userId)
   for (const f of friends) {
@@ -198,4 +231,4 @@ function sendOnlineFriends(userId, ws) {
   ws.send(JSON.stringify({ type: 'online_friends', userIds: onlineFriends }))
 }
 
-module.exports = { setupWebSocket, broadcastToUser, broadcastToRoom, broadcastAgentEvent, broadcastAgentResult }
+module.exports = { setupWebSocket, broadcastToUser, broadcastToRoom, broadcastAgentEvent, broadcastAgentResult, broadcastNovelEvent }

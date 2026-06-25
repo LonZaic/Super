@@ -22,17 +22,53 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# ─── Databases (all SQLite files, including WAL/SHM sidecar) ───
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
 server/bbot.db*
-server/bbot.db-wal
-server/bbot.db-shm
-server/db/bbot.db*
+server/db/*.sqlite*
+server/db/*.db*
+
+# ─── Secrets & env ───
 .env
+.env.*
+!.env.example
+
+# ─── Runtime / user data ───
 .vite
 .vite-temp
+server/workspace/
 server/workspace/downloads/
+server/engine/memory/
+server/engine/memory/*.json
+memory/
+data/
+workspace/
+
+# ─── App-local config (contains user MCP configs / tokens) ───
+.deepseek-super/
+.deepseek-super/**
+
+# ─── SQL dumps & fixtures ───
+server/dump.sql
+*.dump.sql
+
+# ─── Test scratch files (kept locally, not for release) ───
+test_agent_run.js
+test_chat_nonstream.js
+test_image_gen.js
+test_project/
+
+# ─── Backup / dead files ───
+*.bak
+*.bak.*
 FIX_SUMMARY.md
 
-# Build output
+# ─── Build output ───
 release/
 portable-test/
 *.exe
@@ -40,3 +76,9 @@ portable-test/
 *.blockmap
 builder-debug.yml
 latest.yml
+
+# ─── Misc standalone HTML (legacy, not part of build) ───
+chat.html
+
+# ─── Vercel ───
+.vercel/

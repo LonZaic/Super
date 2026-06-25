@@ -49,26 +49,65 @@
       <div class="code-no-proj">{{ t('codeOpenHint') }}</div>
     </div>
 
+    <!-- ═══ Workflow Editor Mode: header ═══ -->
+    <div v-if="isWorkflowEditorRoute" class="code-hdr">
+      <button class="back-btn" @click="$router.push('/workflow')">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 2L4 7l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="code-hdr-name">工作流</span>
+    </div>
+
+    <!-- ═══ Workflow Editor Mode: workflow list (flex fills space) ═══ -->
+    <div v-if="isWorkflowEditorRoute" class="code-ft-wrap wf-side-list">
+      <button class="wf-side-new" @click="createWorkflowFromSidebar">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>新建工作流</span>
+      </button>
+      <div class="wf-side-items">
+        <div
+          v-for="wf in wfStore.workflows"
+          :key="wf.id"
+          :class="['wf-side-item', { active: wf.id === route.params.id }]"
+          @click="$router.push('/workflow/' + wf.id)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" class="wf-side-item-icon">
+            <circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="6" cy="18" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+            <circle cx="18" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8.5 6H14a2 2 0 0 1 2 2v1.5M8.5 18H14a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span class="wf-side-item-name">{{ wf.name }}</span>
+          <button class="wf-side-item-del" @click.stop="deleteWorkflowFromSidebar(wf)" title="删除">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div v-if="!wfStore.workflows.length" class="wf-side-empty">暂无工作流</div>
+      </div>
+    </div>
+
     <!-- New Chat button (collapsed-safe) -->
-    <div v-if="!isCodeRoute" class="new-btns-row">
-      <button class="new-chat-btn" @click="newChat" :title="isAgentRoute ? '新 Agent' : t('newChat')">
+    <div v-if="!isCodeRoute && !isWorkflowEditorRoute" class="new-btns-row">
+      <button class="new-chat-btn" @click="newChat" :title="t('newChat')">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <span v-show="!collapsed">{{ isAgentRoute ? '新 Agent' : t('newChat') }}</span>
+        <span v-show="!collapsed">{{ t('newChat') }}</span>
       </button>
     </div>
 
-    <div v-if="!isCodeRoute" class="nav-section">
+    <div v-if="!isCodeRoute && !isWorkflowEditorRoute" class="nav-section">
       <button class="nav-item" :class="{ active: route.path === '/' }" @click="goHome" :title="collapsed ? t('home') : ''">
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M2 6.5L7.5 2 13 6.5V13H9.5v-3.5h-4V13H2V6.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
         <span v-show="!collapsed">{{ t('home') }}</span>
       </button>
-      <button class="nav-item" :class="{ active: route.path === '/agent' }" @click="$router.push('/agent')" :title="collapsed ? t('agentMode') : ''">
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><circle cx="7.5" cy="7.5" r="5" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7.5a2 2 0 114 0 2 2 0 01-4 0z" stroke="currentColor" stroke-width="1.3"/><path d="M9 9l3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
-        <span v-show="!collapsed">{{ t('agentMode') }}</span>
-      </button>
       <button class="nav-item" :class="{ active: route.path === '/code' }" @click="$router.push('/code')" :title="collapsed ? t('code') : ''">
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M4 2h7l2 2v8a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.3"/><path d="M5 6l2 2-2 2M8 10h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span v-show="!collapsed">{{ t('code') }}</span>
+      </button>
+      <button class="nav-item" :class="{ active: route.path === '/novels' }" @click="$router.push('/novels')" :title="collapsed ? '小说工坊' : ''">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5H6.5A2.5 2.5 0 0 0 4 19.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+        <span v-show="!collapsed">小说</span>
       </button>
       <button class="nav-item" :class="{ active: route.path === '/mcp-skills' }" @click="$router.push('/mcp-skills')" :title="collapsed ? t('mcpSidebar') : ''">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -90,85 +129,90 @@
         </svg>
         <span v-show="!collapsed">收藏</span>
       </button>
-    </div>
-
-    <!-- Search -->
-    <div v-if="!isCodeRoute" class="recents-header">
-      <div :class="['search-box', { 'search-collapsed': collapsed && !searchFocused }]">
-        <svg v-if="!collapsed || searchFocused" class="search-icon" width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.2"/><path d="M7.5 7.5L10.5 10.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-        <input v-model="searchQuery" class="search-input" ref="searchInputRef" :placeholder="collapsed && !searchFocused ? '' : t('searchConvs')" @click.stop @focus="searchFocused = true" @blur="onSearchBlur" />
-        <button v-if="searchQuery" class="search-clear" @click.stop="searchQuery = ''">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-        </button>
-        <!-- Collapsed magnifying glass (clickable icon) -->
-        <svg v-if="collapsed && !searchFocused" class="search-trigger" width="16" height="16" viewBox="0 0 16 16" fill="none" @click="collapsed = false; focusSearch()">
-          <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <button class="nav-item" :class="{ active: route.path === '/knowledge' }" @click="$router.push('/knowledge')" :title="collapsed ? '知识库' : ''">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 7h8M8 11h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
         </svg>
-      </div>
-    </div>
-
-    <!-- ═══ Toolbar actions ═══ -->
-    <div v-if="!isCodeRoute && !collapsed && !isAgentRoute && loggedIn" class="tree-toolbar">
-      <button class="tree-act-btn" @click.stop="newConversationInFolder(null)" title="新建对话">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span v-show="!collapsed">知识库</span>
       </button>
-      <button class="tree-act-btn" @click.stop="newFolderInParent(null)" title="新建文件夹">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M12 11v6M9 14h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+      <button class="nav-item" :class="{ active: route.path.startsWith('/workflow') }" @click="$router.push('/workflow')" :title="collapsed ? '工作流' : ''">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="6" cy="18" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="18" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8.5 6H14a2 2 0 0 1 2 2v1.5M8.5 18H14a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
+        <span v-show="!collapsed">工作流</span>
+      </button>
+      <button class="nav-item" :class="{ active: route.path === '/projects' }" @click="$router.push('/projects')" :title="collapsed ? '项目' : ''">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <path d="M3 7C3 5.9 3.9 5 5 5H9L11 7H19C20.1 7 21 7.9 21 9V17C21 18.1 20.1 19 19 19H5C3.9 19 3 18.1 3 17V7Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+        <span v-show="!collapsed">项目</span>
       </button>
     </div>
 
-    <div v-if="!isCodeRoute" class="recents-list" @contextmenu.prevent="showRootCtxMenu">
-      <!-- ═══ Not logged in: show login prompt ═══ -->
-      <div v-if="!loggedIn && !collapsed" class="recents-empty">
-        <svg width="24" height="24" viewBox="0 0 15 15" fill="none" opacity="0.3">
-          <circle cx="7.5" cy="5" r="2.8" stroke="currentColor" stroke-width="1.3"/>
-          <path d="M2 13c0-3 2.5-5 5.5-5s5.5 2 5.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-        </svg>
-        <span>{{ t('signIn') }}</span>
-      </div>
-      <!-- Collapsed: single bubble icon that expands sidebar on click -->
-      <div v-else-if="collapsed" class="recent-item collapsed-bubble" @click="collapsed = false" title="展开对话列表">
-        <svg class="recent-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-          <path d="M2.5 5a2 2 0 012-2h9a2 2 0 012 2v7a2 2 0 01-2 2H7l-3 2.5L3.5 14A2 2 0 012.5 12V5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <!-- Expanded & logged in: conversation tree -->
-      <template v-else-if="!collapsed">
-        <ConversationsTree
-          v-if="!isAgentRoute"
-          :conversations="safeConversations"
-          :folders="safeFolders"
-          :current-id="isCodeRoute ? codeStore.currentId : store.currentId"
-          :expanded-folders="expandedFolders"
-          :selected-folder-id="selectedFolderId"
-          :search-query="loggedIn ? searchQuery : ''"
-          @select-conversation="openChat"
-          @select-folder="selectFolder"
-          @context-menu="showContextMenu"
-          @drop-conversation="handleDrop"
-          @toggle-folder="toggleFolder"
-          @rename-node="onTreeRename"
-          @delete-node="onTreeDelete"
-        />
-        <ConversationsTree
-          v-else
-          :conversations="loggedIn ? (agStore.conversations || []) : []"
-          :folders="[]"
-          :current-id="agStore.currentId"
-          :selected-folder-id="null"
-          :expanded-folders="{}"
-          :search-query="loggedIn ? searchQuery : ''"
-          @select-conversation="openChat"
-          @context-menu="showContextMenu"
-          @rename-node="onTreeRename"
-          @delete-node="onTreeDelete"
-        />
-      </template>
-    </div>
+    <!-- ═══ Conversation toggle button — moved to sidebar-bottom ═══ -->
+
+    <!-- ═══ Conversation slide-out panel (teleported to body to escape sidebar overflow) ═══ -->
+    <Teleport to="body">
+      <transition name="conv-panel-slide">
+        <div v-if="convPanelOpen && !isCodeRoute && !isWorkflowEditorRoute" class="conv-panel" ref="convPanelRef" @click.stop>
+          <div class="conv-panel-header">
+            <span class="conv-panel-title">对话管理</span>
+            <button class="conv-panel-close" @click="convPanelOpen = false">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="conv-panel-search">
+            <svg class="conv-panel-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <input v-model="searchQuery" class="conv-panel-search-input" :placeholder="t('searchConvs')" />
+            <button v-if="searchQuery" class="conv-panel-search-clear" @click="searchQuery = ''">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="conv-panel-toolbar">
+            <button class="conv-panel-tool-btn" @click.stop="newConversationInFolder(null)" title="新建对话">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <span>新对话</span>
+            </button>
+            <button class="conv-panel-tool-btn" @click.stop="newFolderInParent(null)" title="新建文件夹">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 11v6M9 14h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <span>新文件夹</span>
+            </button>
+          </div>
+          <div class="conv-panel-list" @contextmenu.prevent="showRootCtxMenu">
+            <div v-if="!loggedIn" class="conv-panel-empty">{{ t('signIn') }}</div>
+            <ConversationsTree
+              v-else
+              :conversations="safeConversations"
+              :folders="safeFolders"
+              :current-id="store.currentId"
+              :expanded-folders="expandedFolders"
+              :selected-folder-id="selectedFolderId"
+              :search-query="searchQuery"
+              @select-conversation="openChat"
+              @select-folder="selectFolder"
+              @context-menu="showContextMenu"
+              @drop-conversation="handleDrop"
+              @toggle-folder="toggleFolder"
+              @rename-node="onTreeRename"
+              @delete-node="onTreeDelete"
+            />
+          </div>
+        </div>
+      </transition>
+      <!-- Click-away overlay -->
+      <div v-if="convPanelOpen && !isCodeRoute && !isWorkflowEditorRoute" class="conv-panel-overlay" @click="convPanelOpen = false"></div>
+    </Teleport>
 
     <!-- Context Menu (right-click) -->
     <ContextMenu
@@ -242,12 +286,21 @@
     </Teleport>
 
     <div class="sidebar-bottom">
-      <!-- ═══ Code Mode: history button (same row as lang) ═══ -->
-      <div v-if="isCodeRoute" class="code-hist-wrap">
-        <button class="lang-btn" @click="showCodeHist = !showCodeHist" style="justify-content:flex-start">
+      <!-- ═══ Row 1: 对话管理 (top) ═══ -->
+      <button v-if="!isCodeRoute && !isWorkflowEditorRoute" class="sb-row-btn" :class="{ active: convPanelOpen }" @click="toggleConvPanel" :title="collapsed ? '对话管理' : ''">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span v-show="!collapsed" class="sb-row-label">对话</span>
+        <span v-if="!collapsed && loggedIn && safeConversations.length" class="sb-row-badge">{{ safeConversations.length }}</span>
+      </button>
+
+      <!-- Code Mode: history button (replaces conversation in code mode) -->
+      <div v-if="isCodeRoute" style="position: relative;">
+        <button class="sb-row-btn" @click="showCodeHist = !showCodeHist" :title="collapsed ? t('codeProjectConvs') : ''">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.1"/><path d="M7 4v3.5L9 9" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-          <span>{{ t('codeProjectConvs') }}</span>
-          <span class="code-hist-count" v-if="projectConvs.length" style="margin-left:auto">{{ projectConvs.length }}</span>
+          <span v-show="!collapsed" class="sb-row-label">{{ t('codeProjectConvs') }}</span>
+          <span v-show="!collapsed && projectConvs.length" class="sb-row-badge" style="margin-left:auto">{{ projectConvs.length }}</span>
         </button>
         <Transition name="hist-pop">
           <div v-if="showCodeHist" class="code-hist-popup">
@@ -267,15 +320,16 @@
         </Transition>
       </div>
 
-      <!-- ═══ Settings ═══ -->
-      <button class="lang-btn" @click="openSettings()" :title="collapsed ? '设置' : ''">
+      <!-- ═══ Row 2: 设置 (middle) ═══ -->
+      <button class="sb-row-btn" @click="openSettings()" :title="collapsed ? '设置' : ''">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
           <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.3"/>
           <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.3"/>
         </svg>
-        <span v-show="!collapsed">设置</span>
+        <span v-show="!collapsed" class="sb-row-label">设置</span>
       </button>
 
+      <!-- ═══ Row 3: 登录/用户 (bottom) ═══ -->
       <template v-if="loggedIn">
         <div class="user-row" :title="collapsed ? (userName || 'User') : ''">
           <div class="user-avatar">{{ userName?.charAt(0) || 'U' }}</div>
@@ -300,8 +354,8 @@ import { ref, reactive, computed, onMounted, onUnmounted, inject, watch } from '
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../../store/chatStore.js'
-import { useAgentConversationStore } from '../../stores/agentConversationStore.js'
 import { useCodeStore } from '../../stores/codeStore.js'
+import { useWorkflowStore } from '../../stores/workflowStore.js'
 import { isLoggedIn, logout } from '../../api/index.js'
 import { disconnect } from '../../api/ws.js'
 import { useI18n } from '../../composables/useI18n.js'
@@ -313,12 +367,12 @@ import { createFolder, createFile, scanFileTree } from '../../api/code.api.js'
 const router = useRouter()
 const route = useRoute()
 const store = useChatStore()
-const agStore = useAgentConversationStore()
 const codeStore = useCodeStore()
+const wfStore = useWorkflowStore()
 const { t } = useI18n()
 
-const isAgentRoute = computed(() => route.path === '/agent')
 const isCodeRoute = computed(() => route.path === '/code')
+const isWorkflowEditorRoute = computed(() => route.path.startsWith('/workflow/') && route.params.id)
 const { projectPath: codeProjectPath, fileTree: codeFileTree, projectName: codeProjectName, activeFilePath: codeActiveFile, selectedFolder: codeSelectedFolder } = storeToRefs(codeStore)
 const loggedIn = ref(isLoggedIn())
 const apiKeySet = ref(false)
@@ -334,13 +388,13 @@ watch(() => route.path, () => {
     if (now) {
       // Reload conversations on fresh login
       store.loadConversations()
-      agStore.loadConversations()
     }
   }
 })
 
 const collapsed = ref(localStorage.getItem('sidebar_collapsed') === '1')
 const searchFocused = ref(false)
+const convPanelOpen = ref(false)
 const searchInputRef = ref(null)
 const searchQuery = ref('')
 const renaming = ref(false)
@@ -409,8 +463,6 @@ async function newChat() {
   if (!loggedIn.value) { router.push('/login'); return }
   if (isCodeRoute.value) {
     codeStore.createConversation(t('codeDefaultConv'))
-  } else if (isAgentRoute.value) {
-    await agStore.createConversation('Agent 对话')
   } else {
     const folderId = selectedFolderId.value || getChatFolderId()
     const id = 'conv_' + Date.now()
@@ -422,12 +474,36 @@ async function newChat() {
 function openChat(id) {
   if (isCodeRoute.value) {
     codeStore.switchTab(id)
-  } else if (isAgentRoute.value) {
-    agStore.switchTab(id)
   } else {
     store.switchTab(id); router.push('/chat/' + id)
   }
 }
+
+// ═══ Workflow sidebar actions ═══
+async function createWorkflowFromSidebar() {
+  try {
+    const w = await wfStore.createWorkflow()
+    if (w && w.id) router.push('/workflow/' + w.id)
+  } catch (e) {
+    console.error('[Sidebar] create workflow failed:', e)
+  }
+}
+
+async function deleteWorkflowFromSidebar(wf) {
+  if (!confirm(`确定删除工作流「${wf.name}」吗？`)) return
+  try {
+    await wfStore.deleteWorkflow(wf.id)
+    // If deleting current, go back to list
+    if (route.params.id === wf.id) router.push('/workflow')
+  } catch (e) {
+    console.error('[Sidebar] delete workflow failed:', e)
+  }
+}
+
+// Load workflows when entering workflow editor mode
+watch(isWorkflowEditorRoute, (v) => {
+  if (v) wfStore.loadWorkflows()
+}, { immediate: true })
 
 function onCodeFileSelect(item) {
   codeStore.openFile(item.path, item.name, '')
@@ -493,8 +569,6 @@ function doRename() {
     } else if (isCodeRoute.value) {
       const conv = codeStore.conversations.find(c => c.id === renameId.value)
       if (conv) conv.title = renameText.value.trim()
-    } else if (isAgentRoute.value) {
-      agStore.renameConversation(renameId.value, renameText.value.trim())
     } else {
       store.updateConvTitle(renameId.value, renameText.value.trim())
     }
@@ -516,9 +590,6 @@ async function doDelete() {
   } else if (isCodeRoute.value) {
     codeStore.closeTab(id)
     router.push('/code')
-  } else if (isAgentRoute.value) {
-    agStore.deleteConversation(id)
-    router.push('/agent')
   } else {
     const wasCurrent = store.currentId === id
     await store.deleteConv(id)
@@ -533,6 +604,12 @@ async function doDelete() {
 // ─── Collapse & Search ───
 function focusSearch() { searchFocused.value = true; setTimeout(() => searchInputRef.value?.focus(), 50) }
 function onSearchBlur() { if (!searchQuery.value) searchFocused.value = false }
+function toggleConvPanel() {
+  convPanelOpen.value = !convPanelOpen.value
+  if (convPanelOpen.value && collapsed.value) {
+    collapsed.value = false
+  }
+}
 watch(collapsed, (v) => { localStorage.setItem('sidebar_collapsed', v ? '1' : '0') })
 
 // ─── Context menu ───
@@ -560,14 +637,12 @@ function onTreeSelect(convId) {
 }
 
 function handleDrop(convId, folderId) {
-  if (isAgentRoute.value) return
   store.moveConversation(convId, folderId || null)
 }
 
 // VS Code–style: new folder via dialog, in given parent folder
 function newFolderInParent(parentId) {
   if (!loggedIn.value) { router.push('/login'); return }
-  if (isAgentRoute.value) return
   const target = parentId !== null ? parentId : selectedFolderId.value
   creating.value = { type: 'folder', parentId: target, context: 'chat' }
   createText.value = '新文件夹'
@@ -625,8 +700,6 @@ async function newConversationInFolder(folderId) {
   if (!loggedIn.value) { router.push('/login'); return }
   if (isCodeRoute.value) {
     codeStore.createConversation(t('codeDefaultConv'))
-  } else if (isAgentRoute.value) {
-    await agStore.createConversation('Agent 对话')
   } else {
     const targetFolder = folderId !== null ? folderId : (selectedFolderId.value || getChatFolderId())
     const id = 'conv_' + Date.now()
@@ -650,9 +723,7 @@ function onTreeDelete(type, id, name) {
     confirmDeleteFolder({ id, name })
   } else {
     // Find the conversation object for proper delete
-    const convList = isCodeRoute.value ? codeStore.conversations
-      : isAgentRoute.value ? agStore.conversations
-      : store.conversations
+    const convList = isCodeRoute.value ? codeStore.conversations : store.conversations
     const conv = (convList || []).find(c => c.id === id)
     confirmDelete(conv || { id, title: name })
   }
@@ -683,7 +754,7 @@ function onCtxDelete(id, name) {
   if (ctxMenu.targetType === 'folder') {
     confirmDeleteFolder({ id, name })
   } else {
-    const conv = (isAgentRoute.value ? agStore.conversations : store.conversations).find(c => c.id === id)
+    const conv = store.conversations.find(c => c.id === id)
     confirmDelete(conv || { id, title: name })
   }
 }
@@ -721,7 +792,6 @@ function doDeleteFolder() {
 onMounted(async () => {
   store.loadApiKey()
   await store.loadConversations()
-  agStore.loadConversations()
   apiKeySet.value = store.apikey.length > 0
   keyMode.value = localStorage.getItem('key_mode') || 'builtin'
   loggedIn.value = isLoggedIn()
@@ -736,11 +806,6 @@ onMounted(async () => {
   }
 
   setInterval(() => { loggedIn.value = isLoggedIn(); apiKeySet.value = store.apikey.length > 0; keyMode.value = localStorage.getItem('key_mode') || 'builtin' }, 2000)
-})
-
-// Reload agent conversations when entering agent route
-watch(isAgentRoute, (v) => {
-  if (v) agStore.loadConversations()
 })
 
 </script>
@@ -825,6 +890,35 @@ watch(isAgentRoute, (v) => {
 }
 .code-ft-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .code-no-proj { padding: 16px; text-align: center; font-size: 11px; color: var(--text3); font-weight: 300; }
+
+/* ═══ Workflow sidebar list ═══ */
+.wf-side-list { padding: 8px 8px 0; gap: 8px; }
+.wf-side-new {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--border2);
+  background: transparent; color: var(--accent); cursor: pointer;
+  font-size: 12px; font-weight: 500; transition: all .15s;
+}
+.wf-side-new:hover { background: var(--accent-muted); border-color: var(--accent); }
+.wf-side-items { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; }
+.wf-side-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-radius: 8px; cursor: pointer; transition: background .12s;
+  color: var(--text2); font-size: 12px;
+}
+.wf-side-item:hover { background: var(--bg3); }
+.wf-side-item.active { background: var(--accent-muted); color: var(--accent); }
+.wf-side-item-icon { flex-shrink: 0; opacity: .7; }
+.wf-side-item.active .wf-side-item-icon { opacity: 1; }
+.wf-side-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-side-item-del {
+  width: 20px; height: 20px; border-radius: 4px; border: none;
+  background: transparent; color: var(--text4); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .12s;
+}
+.wf-side-item:hover .wf-side-item-del { opacity: 1; }
+.wf-side-item-del:hover { background: rgba(239,68,68,.15); color: #ef4444; }
+.wf-side-empty { padding: 16px; text-align: center; font-size: 11px; color: var(--text4); }
 
 /* Code history */
 .code-hist-wrap { position: relative; }
@@ -1004,8 +1098,129 @@ watch(isAgentRoute, (v) => {
   color: var(--text); font-size: 14px; font-family: inherit; font-weight: 300;
 }
 .side-dlg-input:focus { border-color: var(--accent); }
-.sidebar-bottom { padding: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; transition: padding .25s cubic-bezier(0.16,1,0.3,1); }
-.collapsed .sidebar-bottom { padding: 6px 4px; border-top-color: transparent; }
+
+/* ═══ Conversation toggle button ═══ */
+.conv-toggle-row { flex-shrink: 0; margin-bottom: 4px; }
+.collapsed .conv-toggle-row { padding: 0; margin-bottom: 4px; }
+.conv-toggle-btn {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg2); color: var(--text2);
+  font-size: 12px; font-family: inherit; font-weight: 500;
+  cursor: pointer; transition: all .15s;
+}
+.collapsed .conv-toggle-btn { justify-content: center; padding: 8px; }
+.conv-toggle-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--border2); }
+.conv-toggle-btn.active { background: var(--accent-bg, rgba(91,141,239,0.12)); color: var(--accent); border-color: var(--accent); }
+.conv-toggle-count {
+  margin-left: auto; background: var(--bg4); color: var(--text3);
+  font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 10px;
+  min-width: 18px; text-align: center;
+}
+.conv-toggle-btn.active .conv-toggle-count { background: var(--accent); color: #fff; }
+
+/* ═══ Conversation slide-out panel (teleported to body) — Apple-style frosted glass ═══ */
+.conv-panel-overlay {
+  position: fixed; inset: 0; z-index: 45;
+  background: transparent;
+}
+.conv-panel {
+  position: fixed; top: 12px; bottom: 12px; left: calc(var(--sidebar-w, 260px) + 8px);
+  width: 320px; z-index: 50;
+  background: color-mix(in srgb, var(--bg2) 72%, transparent);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.40), 0 0 0 0.5px rgba(255,255,255,0.05) inset;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.conv-panel-header {
+  height: 48px; padding: 0 16px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.conv-panel-title { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.2px; }
+.conv-panel-close {
+  border: none; background: transparent; color: var(--text3);
+  width: 28px; height: 28px; cursor: pointer; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .15s;
+}
+.conv-panel-close:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+.conv-panel-search {
+  position: relative; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); flex-shrink: 0;
+}
+.conv-panel-search-icon {
+  position: absolute; left: 26px; top: 50%; transform: translateY(-50%);
+  color: var(--text3); pointer-events: none;
+}
+.conv-panel-search-input {
+  width: 100%; padding: 8px 28px 8px 32px;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+  background: rgba(0,0,0,0.20); color: var(--text);
+  font-size: 12px; font-family: inherit; outline: none;
+  transition: all .15s; box-sizing: border-box;
+}
+.conv-panel-search-input:focus { border-color: var(--accent); background: rgba(0,0,0,0.30); }
+.conv-panel-search-input::placeholder { color: var(--text3); }
+.conv-panel-search-clear {
+  position: absolute; right: 22px; top: 50%; transform: translateY(-50%);
+  border: none; background: transparent; color: var(--text3);
+  width: 20px; height: 20px; cursor: pointer; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+}
+.conv-panel-search-clear:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+.conv-panel-toolbar {
+  display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); flex-shrink: 0;
+}
+.conv-panel-tool-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border: 1px solid rgba(255,255,255,0.08); border-radius: 9px;
+  background: rgba(255,255,255,0.04); color: var(--text2);
+  font-size: 11px; font-family: inherit; cursor: pointer;
+  transition: all .12s;
+}
+.conv-panel-tool-btn:hover { background: rgba(255,255,255,0.10); color: var(--text); border-color: rgba(255,255,255,0.14); }
+.conv-panel-list { flex: 1; overflow-y: auto; min-height: 0; padding: 6px 8px; }
+.conv-panel-list::-webkit-scrollbar { width: 4px; }
+.conv-panel-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 4px; }
+.conv-panel-list::-webkit-scrollbar-track { background: transparent; }
+.conv-panel-empty { padding: 32px 12px; text-align: center; color: var(--text3); font-size: 12px; }
+
+/* Slide animation */
+.conv-panel-slide-enter-active, .conv-panel-slide-leave-active {
+  transition: transform .25s cubic-bezier(0.4, 0, 0.2, 1), opacity .25s;
+}
+.conv-panel-slide-enter-from, .conv-panel-slide-leave-to {
+  transform: translateX(-16px); opacity: 0;
+}
+
+.sidebar-bottom { padding: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; transition: padding .25s cubic-bezier(0.16,1,0.3,1); }
+.collapsed .sidebar-bottom { padding: 6px 4px; border-top-color: transparent; gap: 4px; }
+
+/* ═══ Sidebar row buttons (one per line: 对话 / 设置 / 登录) ═══ */
+.sb-row-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 9px 12px;
+  border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--text2);
+  font-size: 13px; font-family: inherit; font-weight: 500;
+  cursor: pointer; transition: all .15s;
+}
+.collapsed .sb-row-btn { justify-content: center; padding: 9px; }
+.sb-row-btn:hover { background: var(--bg3); color: var(--text); }
+.sb-row-btn.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.sb-row-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; text-align: left; }
+.sb-row-badge {
+  padding: 1px 7px;
+  background: var(--bg4); color: var(--text2);
+  border-radius: 10px; font-size: 10px; font-weight: 600;
+  flex-shrink: 0;
+}
+.collapsed .sb-row-badge { display: none; }
 .collapsed .lang-btn { background: transparent !important; border-color: transparent !important; padding: 8px; justify-content: center; }
 .collapsed .lang-btn:hover { background: var(--bg3) !important; }
 .collapsed .login-prompt { background: transparent !important; padding: 8px; justify-content: center; }

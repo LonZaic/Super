@@ -26,6 +26,21 @@ const { ensureMemDir, getMemoryPrompt, findRelevantMemories, extractMemoriesFrom
 const { loadAllMcpTools, executeMcpTool } = require('../mcp/client')
 const { getSkillsPrompt } = require('../skills/skillLoader')
 const { BUILTIN_DEFS, executeBuiltinTool } = require('../tools/builtinTools')
+const { shouldRelay, createHandoffPackage, autoRelay } = require('./relay')
+const {
+  withRetry,
+  BudgetTracker,
+  LoopDetector,
+  partitionToolCalls,
+  runToolsOrchestrated,
+  StreamingToolExecutor,
+  microCompact,
+  AutoCompactState,
+  calculateTokenWarningState,
+  callDeepSeekWithRetry,
+  callDeepSeekStream,
+  COMPLETION_THRESHOLD,
+} = require('./ccCore')
 
 // ─── Config ───
 const MAX_ROUNDS_BEFORE_COMPACT = 40   // compact & auto-continue at this round
@@ -365,7 +380,7 @@ const executors = {
 // ═══════════════════════════════════════
 // CC-Style Agent Loop — Full Harness
 // ═══════════════════════════════════════
-async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, signal, permissionMode = 'default' }) {
+async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, signal, permissionMode = 'default', roomId = null, agentId = null, agentName = 'DS' }) {
   // ─── Initialize subsystems ───
   const workspaceRoot = WORKSPACE_ROOT
 
@@ -558,6 +573,40 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
       }
     }
 
+    // ─── Relay check (45% threshold) — 上下文接力 ───
+    // 当上下文使用率 >= 45% 时，创建接力包，用新实例继续
+    // 这比单纯压缩更彻底：让 AI 自己写一份9段摘要，然后交接给新实例
+    const relayCheck = shouldRelay(messages)
+    if (relayCheck.shouldRelay) {
+      onProgress({ type: 'relay_start', text: `Context relay triggered (${relayCheck.estimatedTokens} tokens, ${relayCheck.percentUsed}%). Creating handoff package...` })
+      try {
+        const handoff = await createHandoffPackage({
+          messages,
+          apiKey,
+          model: 'deepseek-v4-flash',  // 用 flash 快速生成摘要
+          roomId,
+          agentId,
+          agentName,
+        })
+
+        // 用接力包构建新的消息列表
+        const relayedMessages = autoRelay(handoff)
+        messages.length = 0
+        messages.push(...relayedMessages)
+
+        // 重置循环检测器（新实例从干净状态开始）
+        loopDetector.reset()
+
+        onProgress({
+          type: 'relay_done',
+          text: `Relay complete. New context: ~${estimateTokenCount(relayedMessages)} tokens. Summary: ${handoff.conversationSummary.slice(0, 100)}`,
+          summary: handoff.conversationSummary,
+        })
+      } catch (e) {
+        onProgress({ type: 'warning', text: 'Relay failed, falling back to compaction: ' + e.message })
+      }
+    }
+
     // ─── Anti-loop check ───
     const loopStatus = loopDetector.checkLoop()
     if (loopStatus.isLoop) {
@@ -588,26 +637,124 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
       }
     }
 
-    // ─── Call DeepSeek API ───
+    // ─── Call DeepSeek API (with intelligent retry from ccCore) ───
     let response
     try {
       // Estimate input tokens
       const inputTokens = estimateTokenCount(messages)
       budgetTracker.recordInput(inputTokens)
 
-      const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, tools: allTools, tool_choice: 'auto', max_tokens: 32768, temperature: 0.3 }),
-        signal
-      })
-
-      if (!res.ok) {
-        const errText = await res.text()
-        throw new Error(`API ${res.status}: ${errText.slice(0, 200)}`)
+      // ─── 微压缩: 在 API 调用前清理旧工具结果 ───
+      if (messages.length > 20) {
+        const beforeLen = messages.length
+        const microCompacted = microCompact(messages, { keepRecent: 10 })
+        if (microCompacted.length < beforeLen) {
+          const saved = beforeLen - microCompacted.length
+          onProgress({ type: 'micro_compact', text: `Micro-compact: cleared ${saved} old tool results` })
+        }
       }
 
-      response = await res.json()
+      // ─── 使用流式 API 调用 — 实时输出（关键性能优化）───
+      // 替换原来的 callDeepSeekWithRetry，改用 callDeepSeekStream
+      // 优势：
+      //   - AI 每生成一个 token 就立即推送到群聊（解决"输出不显示"）
+      //   - 用户实时看到 AI 的思考过程（解决"做事慢"的感知）
+      //   - 工具调用检测到就立即执行（StreamingToolExecutor）
+      let streamTextBuffer = ''
+      let lastBroadcastTime = 0
+      const BROADCAST_INTERVAL = 200 // 200ms 节流，避免过于频繁的广播
+
+      try {
+        response = await callDeepSeekStream({
+          apiKey,
+          model,
+          messages,
+          options: {
+            tools: allTools,
+            max_tokens: 32768,
+            temperature: 0.3,
+          },
+          signal,
+          onToken: (text) => {
+            streamTextBuffer += text
+            // 节流广播：每 200ms 广播一次当前累积的文本
+            const now = Date.now()
+            if (now - lastBroadcastTime > BROADCAST_INTERVAL) {
+              lastBroadcastTime = now
+              onProgress({
+                type: 'stream_text',
+                text: streamTextBuffer,
+                isPartial: true,
+              })
+            }
+          },
+          onToolCall: (toolCall) => {
+            // 检测到工具调用时立即通知
+            if (toolCall.function?.name) {
+              onProgress({
+                type: 'tool_detected',
+                tool: toolCall.function.name,
+              })
+            }
+          },
+        })
+
+        // 流结束后，广播完整的 thinking 内容
+        if (streamTextBuffer) {
+          onProgress({ type: 'thinking', text: streamTextBuffer })
+          // 最后再广播一次完整文本（非 partial）
+          onProgress({
+            type: 'stream_text',
+            text: streamTextBuffer,
+            isPartial: false,
+          })
+        }
+      } catch (streamErr) {
+        // 流式失败，回退到带重试的非流式调用
+        const status = streamErr.status || 0
+        const isOverloaded = status === 529 || status === 429
+        const isNetwork = streamErr.message?.includes('fetch') || streamErr.message?.includes('network')
+
+        if (isOverloaded || isNetwork) {
+          onProgress({ type: 'warning', text: `Stream failed (${status}), retrying with fallback...` })
+          // 用带智能重试的非流式调用
+          const { result, model: usedModel, fallbackTriggered } = await callDeepSeekWithRetry({
+            apiKey,
+            model,
+            messages,
+            options: {
+              tools: allTools,
+              tool_choice: 'auto',
+              max_tokens: 32768,
+              temperature: 0.3,
+            },
+            signal,
+            onRetry: (info) => {
+              if (info.type === 'fallback') {
+                onProgress({ type: 'warning', text: `API overloaded, falling back to ${info.toModel}...` })
+              } else if (info.type === '529') {
+                onProgress({ type: 'warning', text: `API overloaded, retry ${info.attempt} in ${Math.round(info.delayMs / 1000)}s...` })
+              } else if (info.type === 'network') {
+                onProgress({ type: 'warning', text: `Network error, retry ${info.attempt}...` })
+              } else if (info.type === 'max_tokens_adjust') {
+                onProgress({ type: 'warning', text: `Adjusting max_tokens to ${info.maxTokens} due to context limit...` })
+              }
+            },
+          })
+          response = result
+          if (fallbackTriggered) {
+            onProgress({ type: 'warning', text: `Using fallback model: ${usedModel}` })
+          }
+          // 非流式也要广播 thinking
+          const msg = response.choices?.[0]?.message
+          if (msg?.content) {
+            onProgress({ type: 'thinking', text: msg.content })
+            onProgress({ type: 'stream_text', text: msg.content, isPartial: false })
+          }
+        } else {
+          throw streamErr
+        }
+      }
 
       // Track output tokens
       if (response.usage) {
@@ -624,25 +771,10 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
       loopDetector.recordError(errMsg)
       lastError = errMsg
 
-      // Retry once for network errors
-      if (e.message.includes('fetch') || e.message.includes('network') || e.message.includes('ECONN') || e.message.includes('aborted')) {
-        if (signal && signal.aborted) break
-        onProgress({ type: 'thinking', text: 'Network error, retrying in 2s...' })
-        await new Promise(r => setTimeout(r, 2000))
-        try {
-          const retryRes = await fetch('https://api.deepseek.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            body: JSON.stringify({ model, messages, tools: allTools, tool_choice: 'auto', max_tokens: 32768, temperature: 0.3 }),
-            signal
-          })
-          if (retryRes.ok) { response = await retryRes.json(); onProgress({ type: 'thinking', text: 'Retry succeeded.' }) }
-          else { finalResult = errMsg; break }
-        } catch { finalResult = errMsg; break }
-      } else {
-        finalResult = errMsg
-        break
-      }
+      // ccCore 的 withRetry 已经处理了所有重试逻辑
+      // 如果到这里说明重试也失败了，直接 break
+      finalResult = errMsg
+      break
     }
 
     if (!response) continue
@@ -679,8 +811,15 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
     // ─── Add assistant message ───
     messages.push({ role: 'assistant', content: msg.content || null, tool_calls: msg.tool_calls })
 
-    // ─── Execute tool calls (with hooks & permissions) ───
-    for (const tc of msg.tool_calls) {
+    // ─── Execute tool calls (CC-style orchestrated: 只读并行, 写操作串行) ───
+    // 移植自 Claude Code 的 toolOrchestration.ts:
+    //   1. partitionToolCalls — 将工具分区（只读 vs 写操作）
+    //   2. 只读批次并行执行（如多个 read_file 同时执行）
+    //   3. 写操作批次串行执行（避免冲突）
+    const toolCalls = msg.tool_calls
+
+    // 定义工具执行函数
+    const executeToolFn = async (tc) => {
       const toolName = tc.function?.name
       let args = {}
       try { args = JSON.parse(tc.function?.arguments || '{}') } catch {}
@@ -692,11 +831,9 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
       if (!preHookResult.allowed) {
         const blockMsg = `Tool "${toolName}" blocked by PreToolUse hook: ${preHookResult.blockReason}`
         onProgress({ type: 'hook_blocked', text: blockMsg, tool: toolName })
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: `[Blocked by hook] ${blockMsg}` })
-        continue
+        return { tool_call_id: tc.id, content: `[Blocked by hook] ${blockMsg}` }
       }
       if (preHookResult.modifiedInput && preHookResult.modifiedInput !== args) {
-        const oldArgs = JSON.stringify(args)
         args = preHookResult.modifiedInput
         onProgress({ type: 'hook_modified', text: `Input modified by hook for ${toolName}`, tool: toolName })
       }
@@ -709,13 +846,10 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
       if (!permCheck.allowed) {
         const denyMsg = `Permission denied: ${permCheck.reason}`
         onProgress({ type: 'permission_denied', text: denyMsg, tool: toolName })
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: `[Permission Denied] ${denyMsg}. You do not have permission to perform this operation under "${permissionMode}" mode. Try a different approach.` })
-        continue
+        return { tool_call_id: tc.id, content: `[Permission Denied] ${denyMsg}. You do not have permission to perform this operation under "${permissionMode}" mode. Try a different approach.` }
       }
       if (permCheck.needsConfirmation) {
         onProgress({ type: 'permission_needed', text: `Permission needed for ${toolName}: ${permCheck.reason}`, tool: toolName })
-        // In default mode with no interactive prompt available, allow with warning
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: `[Notice] This operation requires confirmation but is being auto-allowed. Proceed with caution.` })
       }
 
       // ─── Execute tool ───
@@ -728,6 +862,56 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
         }
       } else if (['fetch_url','weather','time','github','notion','sqlite','docker','amap'].includes(toolName)) {
         result = await executeBuiltinTool(toolName, args)
+      } else if (toolName === 'update_plan') {
+        // ─── Plan 工具：广播计划到前端小条子 ───
+        result = '计划已更新'
+        try {
+          const plan = args.plan || []
+          const summary = args.summary || ''
+          // 广播 plan 事件
+          onProgress({ type: 'plan', plan, summary })
+          result = `计划已更新（${plan.length} 步）${summary ? '：' + summary : ''}`
+        } catch (e) {
+          result = '计划更新失败: ' + e.message
+        }
+      } else if (toolName === 'save_memory') {
+        // ─── 保存记忆到共享上下文 ───
+        result = '记忆已保存'
+        try {
+          if (roomId) {
+            const { dsMemory } = require('../db')
+            const memType = args.type || 'fact'
+            dsMemory.set(roomId, args.key, args.value, agentId || null)
+            result = `已保存记忆: ${args.key}`
+          } else {
+            result = '当前会话不支持共享记忆'
+          }
+        } catch (e) {
+          result = '保存记忆失败: ' + e.message
+        }
+      } else if (toolName === 'read_memory') {
+        // ─── 读取共享记忆 ───
+        result = '无共享记忆'
+        try {
+          if (roomId) {
+            const { dsMemory } = require('../db')
+            const memories = dsMemory.listByRoom(roomId)
+            if (args.key) {
+              const found = memories.find(m => m.key === args.key)
+              result = found ? `${found.key}: ${found.value}` : `未找到记忆: ${args.key}`
+            } else {
+              if (memories.length > 0) {
+                result = memories.map(m => `- ${m.key}: ${m.value}`).join('\n')
+              } else {
+                result = '共享记忆为空'
+              }
+            }
+          } else {
+            result = '当前会话不支持共享记忆'
+          }
+        } catch (e) {
+          result = '读取记忆失败: ' + e.message
+        }
       } else {
         const executor = executors[toolName]
         if (!executor) {
@@ -752,12 +936,29 @@ async function runAgent({ task, apiKey, model = 'deepseek-v4-pro', onProgress, s
         agentContext.hooksFired += postHookResult.results.length
       }
 
-      onProgress({ type: 'tool_result', tool: toolName, result: String(result).slice(0, 500) })
+      return { tool_call_id: tc.id, content: result, _toolName: toolName, _args: args }
+    }
 
-      // Record action for loop detection
-      loopDetector.recordAction(toolName, args, result, msg.content)
+    // ─── 使用 ccCore 的工具编排执行 ───
+    // 只读工具（read_file, glob, grep 等）会并行执行
+    // 写操作工具（write_file, edit_file, run_command 等）会串行执行
+    const toolResults = await runToolsOrchestrated(
+      toolCalls,
+      executeToolFn,
+      (event) => {
+        if (event.type === 'batch_start') {
+          if (event.isConcurrencySafe && event.count > 1) {
+            onProgress({ type: 'tools_parallel', text: `Running ${event.count} read-only tools in parallel: ${event.tools.join(', ')}` })
+          }
+        }
+      }
+    )
 
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: result })
+    // 将结果添加到消息列表
+    for (const r of toolResults) {
+      const { tool_call_id, content, _toolName, _args } = r
+      messages.push({ role: 'tool', tool_call_id, content })
+      loopDetector.recordAction(_toolName, _args, content, msg.content)
     }
 
     // ─── Check if stuck ───

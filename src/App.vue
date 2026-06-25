@@ -6,11 +6,14 @@
     <main class="main-area">
       <router-view v-slot="{ Component, route: r }">
         <transition name="fade-up" mode="out-in">
-          <component :is="Component" :key="r.fullPath" />
+          <keep-alive :include="['ChatView']">
+            <component :is="Component" :key="r.fullPath" />
+          </keep-alive>
         </transition>
       </router-view>
     </main>
     <SettingsPanel :visible="settingsOpen" @close="settingsOpen = false" />
+    <CommandPalette />
   </div>
 </template>
 
@@ -18,6 +21,7 @@
 import { ref, provide, onMounted } from 'vue'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import SettingsPanel from './components/layout/SettingsPanel.vue'
+import CommandPalette from './components/CommandPalette.vue'
 import { useTheme } from './composables/useTheme.js'
 import { connect } from './api/ws.js'
 

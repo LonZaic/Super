@@ -17,26 +17,39 @@ export function hasSMTP() {
 
 // ─── send ───
 // Uses Vite dev server's /api/send-email proxy (nodemailer, zero external dependency)
+// attachments: [{ filename, path }] for local files, [{ filename, url }] for remote, [{ filename, content }] for base64
 
-export async function sendEmail(to, subject, body) {
+export async function sendEmail(to, subject, body, options = {}) {
     const cfg = loadSMTPConfig()
     if (!cfg) throw new Error('SMTP 未配置')
-    if (!to || !subject) throw new Error('收件人或主题为空')
+    // Normalize `to` to a comma-separated string (supports array of recipients)
+    const toStr = Array.isArray(to) ? to.filter(Boolean).join(', ') : to
+    if (!toStr || !subject) throw new Error('收件人或主题为空')
 
-    console.log('[Email] sending via local proxy...', { host: cfg.host, user: cfg.user, to, subject })
+    const payload = {
+        host: cfg.host, port: cfg.port || '465',
+        user: cfg.user, pass: cfg.pass,
+        to: toStr, subject, text: body,
+    }
+    if (options.cc) {
+        payload.cc = Array.isArray(options.cc) ? options.cc.filter(Boolean).join(', ') : options.cc
+    }
+    if (options.html) payload.html = options.html
+    if (Array.isArray(options.attachments) && options.attachments.length > 0) {
+        payload.attachments = options.attachments
+    }
+
+    const recipientCount = Array.isArray(to) ? to.filter(Boolean).length : 1
+    console.log('[Email] sending via local proxy...', { host: cfg.host, user: cfg.user, to: toStr, subject, recipients: recipientCount, attachments: payload.attachments?.length || 0 })
     const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            host: cfg.host, port: cfg.port || '465',
-            user: cfg.user, pass: cfg.pass,
-            to, subject, text: body,
-        }),
+        body: JSON.stringify(payload),
     })
     const data = await res.json()
     if (!data.success) throw new Error(data.error || '发送失败')
-    console.log('[Email] sent:', data.messageId)
-    return data
+    console.log('[Email] sent:', data.messageId, 'to', recipientCount, 'recipients')
+    return { ...data, recipients: recipientCount }
 }
 
 // ─── time parser ───
@@ -119,21 +132,21 @@ export function restoreSchedules(onFire) {
         if (delay <= 0) fn(); else setTimeout(fn, delay)
     }
 }
-export function scheduleEmail(to, subject, body, scheduleText) {
+export function scheduleEmail(to, subject, body, scheduleText, options = {}) {
     const parsed = parseSendTime(scheduleText || '立即')
     if (parsed.type === 'immediate' || parsed.delay <= 100) {
-        return sendEmail(to, subject, body)
+        return sendEmail(to, subject, body, options)
     }
     const id = 'sch_' + Date.now()
-    saveScheduledEmail({ id, to, subject, body, fireAt: Date.now() + parsed.delay, scheduleText })
+    saveScheduledEmail({ id, to, subject, body, fireAt: Date.now() + parsed.delay, scheduleText, options })
     setTimeout(() => {
-        sendEmail(to, subject, body).then(() => removeScheduledEmail(id)).catch(() => {})
+        sendEmail(to, subject, body, options).then(() => removeScheduledEmail(id)).catch(() => {})
     }, parsed.delay)
     return Promise.resolve({ scheduled: true, time: parsed.time, id })
 }
 export function initEmailScheduler() {
     restoreSchedules(async (task) => {
-        try { await sendEmail(task.to, task.subject, task.body) } catch (e) {
+        try { await sendEmail(task.to, task.subject, task.body, task.options || {}) } catch (e) {
             console.warn('[Email] schedule fail:', e.message)
         }
     })

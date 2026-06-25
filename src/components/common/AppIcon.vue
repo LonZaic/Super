@@ -236,6 +236,12 @@
       <circle cx="12" cy="12" r="3.5" stroke="currentColor" stroke-width="1.5"/>
     </template>
 
+    <!-- Sparkles (AI / Canvas) -->
+    <template v-else-if="name === 'sparkles'">
+      <path d="M12 3L13.5 8.5L19 10L13.5 11.5L12 17L10.5 11.5L5 10L10.5 8.5L12 3Z" fill="currentColor"/>
+      <path d="M19 14L19.7 16.3L22 17L19.7 17.7L19 20L18.3 17.7L16 17L18.3 16.3L19 14Z" fill="currentColor"/>
+    </template>
+
     <!-- Eye Off (no preview / binary) -->
     <template v-else-if="name === 'eye-off'">
       <path d="M17.94 17.94C15.69 19.27 13.19 19.77 10.64 19.03C8.09 18.29 5.83 16.41 4.5 13.87C3.95 12.7 3.95 11.3 4.5 10.13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>

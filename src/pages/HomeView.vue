@@ -41,48 +41,65 @@
         <span class="greeting-text">{{ greeting }}</span>
       </div>
 
-      <div class="feature-grid">
-        <div class="feature-card" @click="openFeature('design')">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <rect x="1" y="1" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M1 6h16M5 6v11" stroke="currentColor" stroke-width="1.3"/>
-          </svg>
-          <div class="feature-card-title">{{ t('livePreview') }}</div>
-          <div class="feature-card-desc">{{ t('livePreviewDesc') }}</div>
-        </div>
-        <div class="feature-card" @click="openFeature('code')">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M5 5L2 9l3 4M13 5l3 4-3 4M10 3l-2 12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <div class="feature-card-title">{{ t('codePanel') }}</div>
-          <div class="feature-card-desc">{{ t('codePanelDesc') }}</div>
-        </div>
-        <div class="feature-card" @click="$router.push('/groups')">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <circle cx="6" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.3"/>
-            <circle cx="13" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M1 14c0-2.4 2-4.5 5-4.5s5 2.1 5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            <path d="M12 8.5c1.8 0 3.5 1.3 3.5 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-          <div class="feature-card-title">{{ t('groupChatTitle') }}</div>
-          <div class="feature-card-desc">{{ t('groupChatDesc') }}</div>
-        </div>
-        <div class="feature-card" @click="openSettings('api')">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M2 5h14M2 9h8M2 13h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            <circle cx="14" cy="12" r="3" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M16.5 14.5l1.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-          <div class="feature-card-title">{{ t('apiCard') }}</div>
-          <div class="feature-card-desc">{{ t('apiCardDesc') }}</div>
-        </div>
-        <div class="feature-card" @click="openSettings('email')">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <rect x="2" y="4" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M2 6.5l7 4.5 7-4.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
-          <div class="feature-card-title">{{ t('emailCard') }}</div>
-          <div class="feature-card-desc">{{ t('emailCardDesc') }}</div>
+      <div class="hp-sections">
+        <!-- 特色功能 -->
+        <div class="hp-section">
+          <div class="hp-section-title">{{ t('hpFeatureSection') }}</div>
+          <div class="feature-grid">
+            <div class="feature-card primary" @click="newChat()">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M3 4h12v8H6l-3 3V4z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="6.5" cy="8" r="0.8" fill="currentColor"/>
+                <circle cx="9" cy="8" r="0.8" fill="currentColor"/>
+                <circle cx="11.5" cy="8" r="0.8" fill="currentColor"/>
+              </svg>
+              <div class="feature-card-title">{{ t('hpQuickStart') }}</div>
+              <div class="feature-card-desc">{{ t('hpQuickStartDesc') }}</div>
+            </div>
+            <div class="feature-card" @click="$router.push('/groups')">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <circle cx="6" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.3"/>
+                <circle cx="13" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M1 14c0-2.4 2-4.5 5-4.5s5 2.1 5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M12 8.5c1.8 0 3.5 1.3 3.5 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <div class="feature-card-title">{{ t('groupChatTitle') }}</div>
+              <div class="feature-card-desc">{{ t('groupChatDesc') }}</div>
+            </div>
+            <div class="feature-card" @click="$router.push('/knowledge')">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M3 2v14h12V2H3z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                <path d="M6 6h6M6 9h6M6 12h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <div class="feature-card-title">{{ t('hpKnowledge') }}</div>
+              <div class="feature-card-desc">{{ t('hpKnowledgeDesc') }}</div>
+            </div>
+            <div class="feature-card" @click="$router.push('/workflow')">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <rect x="2" y="3" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="11" y="3" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="6.5" y="11" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M4.5 7v2a1 1 0 001 1h1M13.5 7v2a1 1 0 01-1 1h-1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <div class="feature-card-title">{{ t('hpWorkflow') }}</div>
+              <div class="feature-card-desc">{{ t('hpWorkflowDesc') }}</div>
+            </div>
+            <div class="feature-card" @click="$router.push('/novels')">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M3 3.5C3 3.22 3.22 3 3.5 3H8c.83 0 1.5.67 1.5 1.5V15c0-.83-.67-1.5-1.5-1.5H3.5c-.28 0-.5-.22-.5-.5V3.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                <path d="M15 3.5c0-.28-.22-.5-.5-.5H10c-.83 0-1.5.67-1.5 1.5V15c0-.83.67-1.5 1.5-1.5h4.5c.28 0 .5-.22.5-.5V3.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+              </svg>
+              <div class="feature-card-title">{{ t('hpNovels') }}</div>
+              <div class="feature-card-desc">{{ t('hpNovelsDesc') }}</div>
+            </div>
+            <div class="feature-card" @click="$router.push('/projects')">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M2 5a1 1 0 011-1h3l1.5 2H15a1 1 0 011 1v7a1 1 0 01-1 1H3a1 1 0 01-1-1V5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+              </svg>
+              <div class="feature-card-title">{{ t('hpProjects') }}</div>
+              <div class="feature-card-desc">{{ t('hpProjectsDesc') }}</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -111,16 +128,16 @@
           <div class="input-toolbar">
             <div class="toolbar-left">
               <input ref="fileInputRef" type="file" multiple class="hp-hidden-input" @change="onFilesSelected" />
-              <button class="tool-btn" title="添加文件" @click="fileInputRef?.click()">
+              <button class="tool-btn" :title="t('addFile')" @click="fileInputRef?.click()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
               </button>
               <button :class="['tool-btn bordered', { active: thinking === 'on' }]" @click="cycleThinking">
                 <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 3v3.5L9 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
                 {{ thinkingLabel }}
               </button>
-              <button :class="['tool-btn bordered', { active: computerMode }]" @click="computerMode = !computerMode" title="管理电脑">
+              <button :class="['tool-btn bordered', { active: computerMode }]" @click="computerMode = !computerMode" :title="t('manageComputer')">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                管理电脑
+                {{ t('manageComputer') }}
                 <span v-if="computerMode" class="hp-pc-dot"></span>
               </button>
             </div>
@@ -154,6 +171,7 @@ import { useI18n } from '../composables/useI18n.js'
 import ChatView from './ChatView.vue'
 import TokenBar from '../components/common/TokenBar.vue'
 import { computerMode } from '../stores/computerModeStore.js'
+import { setConversationProject } from '../db/database.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -251,13 +269,13 @@ async function quickStart() {
     pendingFiles.value = []
     const id = 'conv_' + Date.now()
     await store.createConversation(id)
-    await store.addUserMessage(text || '(文件)', files)
+    await store.addUserMessage(text || t('fileText'), files)
     // 必须在 addUserMessage 之后设置——确保 ChatView 检测时消息已入库
     store._pendingAutoReply = id
     router.push('/chat/' + id)
   } catch (e) {
-    delete store._pendingAutoReply
-    alert('发送失败: ' + (e.message || '未知错误'))
+    store._pendingAutoReply = null
+    alert(t('sendFail').replace('{msg}', e.message || t('unknownError')))
     inputText.value = text
   }
 }
@@ -327,6 +345,14 @@ onMounted(async () => {
   await store._restoreSession()
   loggedIn.value = isLoggedIn()
   await syncRoute()
+  // Handle ?project=ID — create a new conversation assigned to this project
+  const projectId = route.query.project
+  if (projectId) {
+    const id = 'conv_' + Date.now()
+    await store.createConversation(id)
+    setConversationProject(id, String(projectId))
+    router.replace('/chat/' + id)
+  }
 })
 </script>
 
@@ -434,8 +460,31 @@ onMounted(async () => {
   gap: 10px;
   width: 100%;
   max-width: 680px;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
   animation: fadeUp .5s .1s ease both;
+}
+.feature-grid.small {
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.hp-sections {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.hp-section { display: flex; flex-direction: column; gap: 8px; }
+.hp-section-title {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text3);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding-left: 2px;
 }
 
 .feature-card {
@@ -444,12 +493,22 @@ onMounted(async () => {
   border-radius: var(--radius);
   padding: 14px 16px;
   cursor: pointer;
-  transition: background .15s, border-color .15s;
+  transition: background .15s, border-color .15s, transform .1s;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.feature-card:hover { background: var(--bg3); border-color: var(--border2); }
+.feature-card:hover { background: var(--bg3); border-color: var(--border2); transform: translateY(-1px); }
+.feature-card:active { transform: translateY(0); }
+.feature-card.primary {
+  background: var(--accent-muted, rgba(0,0,0,0.03));
+  border-color: var(--accent);
+}
+.feature-card.primary:hover { background: var(--accent-hover, var(--bg3)); }
+.feature-card.primary .feature-card-title { color: var(--accent); }
+.feature-card.mini { padding: 10px 12px; gap: 4px; }
+.feature-card.mini .feature-card-title { font-size: 12px; }
+.feature-card.mini .feature-card-desc { font-size: 11px; -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 .feature-card-icon { color: var(--text2); }
 .feature-card-title { font-size: 13px; font-weight: 500; color: var(--text); }
 .feature-card-desc { font-size: 12px; color: var(--text3); line-height: 1.5; font-weight: 300; }

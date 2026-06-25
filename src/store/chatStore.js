@@ -27,11 +27,16 @@ export const useChatStore = defineStore('chat', {
         model: 'deepseek-v4-flash',
         permissionMode: 'default',   // 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions'
         loadingMap: {},         // { [convId]: boolean } — per-conversation loading state
-        streamingId: null,
-        streamingConvId: null,  // which conversation owns the active stream
+        streamingMap: {},       // { [convId]: msgId } — per-conversation streaming state (supports concurrent AI across tabs!)
+        _pendingAutoReply: null, // convId awaiting auto-reply from HomeView quickStart
     }),
 
     getters: {
+        // Per-conversation streaming ID getter — reads from streamingMap for current tab
+        streamingId(state) {
+            return state.streamingMap[state.currentId] || null
+        },
+
         messages(state) {
             return state.messagesMap[state.currentId] || []
         },
@@ -218,6 +223,10 @@ export const useChatStore = defineStore('chat', {
                 ? ((await convApi.list().catch(() => getConversations())) || [])
                 : getConversations()
             if (!this.openTabs.includes(id)) {
+                // Enforce max 10 concurrent tabs — remove oldest from tab bar (stream keeps running)
+                if (this.openTabs.length >= 10) {
+                    this.openTabs.shift()
+                }
                 this.openTabs.push(id)
             }
             this._saveSession()
@@ -305,6 +314,14 @@ export const useChatStore = defineStore('chat', {
 
         closeTab(id) {
             this.openTabs = this.openTabs.filter(t => t !== id)
+            // Abort any running stream for this conversation when closing its tab
+            if (this.streamingMap[id]) {
+                delete this.streamingMap[id]
+            }
+            if (_abortMap[id]) {
+                _abortMap[id].abort()
+                delete _abortMap[id]
+            }
             if (this.currentId === id) {
                 const next = this.openTabs.length > 0 ? this.openTabs[0] : null
                 if (next) {
@@ -324,7 +341,14 @@ export const useChatStore = defineStore('chat', {
             // ALWAYS use local sql.js first — synchronous, gets real ID immediately.
             // This is critical: ChatView calls addUserMessage() without await,
             // then immediately calls startStreamReply() which must find this message.
-            const newId = addMessage(this.currentId, 'user', text, null, filesJson)
+            let newId = null
+            try {
+                newId = addMessage(this.currentId, 'user', text, null, filesJson)
+            } catch (e) {
+                // DB error (e.g. missing column) — don't block the UI, use temp ID
+                console.warn('[Store] addMessage (user) DB failed, using temp ID:', e.message)
+                newId = 'tmp_user_' + Date.now()
+            }
             const msg = { role: 'user', text, id: newId, files }
             const msgs = this.messagesMap[this.currentId] || []
             msgs.push(msg)
@@ -344,7 +368,6 @@ export const useChatStore = defineStore('chat', {
         startStreamReply(convId) {
             const cid = convId || this.currentId
             const tempId = 'stream_' + Date.now()
-            this.streamingConvId = cid
             let parentId = null
             const msgs = this.messagesMap[cid] || []
             for (let i = msgs.length - 1; i >= 0; i--) {
@@ -361,7 +384,7 @@ export const useChatStore = defineStore('chat', {
                 _sideQuest: null,
             })
             this.messagesMap[cid] = msgs
-            this.streamingId = tempId
+            this.streamingMap[cid] = tempId  // per-conversation: doesn't affect other tabs
             return tempId
         },
 
@@ -418,8 +441,10 @@ export const useChatStore = defineStore('chat', {
         async finishStreamReply(tempId) {
             const r = this._findStreamMsg(tempId)
             if (!r) {
-                this.streamingId = null
-                this.streamingConvId = null
+                // Clean up any dangling streaming state for this tempId
+                for (const cid of Object.keys(this.streamingMap)) {
+                    if (this.streamingMap[cid] === tempId) delete this.streamingMap[cid]
+                }
                 return null
             }
             const { msg, msgs, convId } = r
@@ -429,7 +454,14 @@ export const useChatStore = defineStore('chat', {
             const downloadFilesJson = JSON.stringify(msg._downloadFiles || [])
 
             // ALWAYS save locally first (synchronous, gets real ID immediately)
-            const realId = addMessage(convId, 'ai', msg.text, msg.parent_id, '[]', designsJson, reasoning, downloadFilesJson, sideQuestJson)
+            let realId = null
+            try {
+                realId = addMessage(convId, 'ai', msg.text, msg.parent_id, '[]', designsJson, reasoning, downloadFilesJson, sideQuestJson)
+            } catch (e) {
+                // DB error — don't crash, keep the temp message as final
+                console.warn('[Store] addMessage (ai) DB failed, keeping temp ID:', e.message)
+                realId = tempId
+            }
 
             // Sync to server API in background
             if (this._useServerApi()) {
@@ -453,6 +485,10 @@ export const useChatStore = defineStore('chat', {
                 _isSystemFallback: msg._isSystemFallback || false,
                 _liveSvg: msg._liveSvg || '',
                 _sideQuest: msg._sideQuest || null,
+                // Preserve interactive UI state injected during streaming
+                _imageGallery: msg._imageGallery || null,
+                _userChoice: msg._userChoice || null,
+                _fileConfirm: msg._fileConfirm || null,
             }
             if (idx !== -1) {
                 msgs[idx] = finalMsg
@@ -463,8 +499,7 @@ export const useChatStore = defineStore('chat', {
                 bs[msg.parent_id] = realId
                 this.branchStateMap[convId] = { ...bs }
             }
-            this.streamingId = null
-            this.streamingConvId = null
+            delete this.streamingMap[convId]  // only clear THIS conversation's stream
             this._lastFinishedId = realId
             this._lastFinishedMsg = finalMsg
             this._saveSession()
@@ -564,6 +599,114 @@ export const useChatStore = defineStore('chat', {
             }
         },
 
+        // ─── Fork conversation: create a new conversation from a message point ───
+        // Copies all messages up to and including the given messageId into a new conversation.
+        // Preserves parent_id relationships for branch navigation.
+        async forkConversation(fromMessageId, title) {
+            if (!this.currentId) return null
+            const sourceConvId = this.currentId
+            const sourceMsgs = this.messagesMap[sourceConvId] || []
+            const forkIdx = sourceMsgs.findIndex(m => m.id === fromMessageId)
+            if (forkIdx === -1) return null
+
+            // Messages to copy (up to and including the fork point)
+            const msgsToCopy = sourceMsgs.slice(0, forkIdx + 1)
+            if (!msgsToCopy.length) return null
+
+            // Create new conversation
+            const newConvId = 'conv_' + Date.now()
+            const forkTitle = title || `分支 · ${new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+
+            // Create conversation in DB + server
+            if (this._useServerApi()) {
+                try {
+                    await convApi.create(newConvId, this.model)
+                    if (forkTitle) {
+                        await convApi.update(newConvId, { title: forkTitle }).catch(() => {})
+                    }
+                } catch (e) {
+                    console.warn('[Store] fork create conv API failed:', e.message)
+                    dbCreateConv(newConvId, this.model, null)
+                }
+            } else {
+                dbCreateConv(newConvId, this.model, null)
+            }
+
+            // Map old message IDs → new message IDs (for parent_id preservation)
+            const idMap = {} // oldId → newId
+            const newMsgs = []
+
+            for (const m of msgsToCopy) {
+                const newParentId = m.parent_id != null ? (idMap[m.parent_id] || null) : null
+                const filesJson = typeof m.files === 'string' ? m.files : JSON.stringify(m.files || [])
+                const designsJson = typeof m.designs === 'string' ? m.designs : JSON.stringify(m.designs || [])
+                const reasoning = m.reasoning || ''
+                const dlJson = JSON.stringify(m._downloadFiles || [])
+                const sqJson = m._sideQuest ? JSON.stringify(m._sideQuest) : ''
+
+                // Insert into local DB
+                const newId = addMessage(newConvId, m.role, m.text || '', newParentId, filesJson, designsJson, reasoning, dlJson, sqJson)
+                idMap[m.id] = newId
+
+                const newMsg = this._hydrateMsg({
+                    id: newId,
+                    conv_id: newConvId,
+                    role: m.role,
+                    text: m.text || '',
+                    parent_id: newParentId,
+                    files: filesJson,
+                    designs: designsJson,
+                    reasoning,
+                    download_files: dlJson,
+                    side_quest: sqJson,
+                })
+                newMsgs.push(newMsg)
+
+                // Sync to server API in background
+                if (this._useServerApi()) {
+                    convApi.addMessage(newConvId, {
+                        role: m.role,
+                        text: m.text || '',
+                        parent_id: newParentId,
+                        files: filesJson,
+                        designs: designsJson,
+                        reasoning,
+                        download_files: dlJson,
+                        side_quest: sqJson,
+                    }).catch(() => {})
+                }
+            }
+
+            // Set up branch state for new conversation
+            const newBranchState = {}
+            for (const m of newMsgs) {
+                if (m.role === 'ai' && m.parent_id != null) {
+                    newBranchState[m.parent_id] = m.id
+                }
+            }
+
+            // Update store state
+            this.messagesMap[newConvId] = newMsgs
+            this.branchStateMap[newConvId] = newBranchState
+            this.conversations = this._useServerApi()
+                ? ((await convApi.list().catch(() => getConversations())) || [])
+                : getConversations()
+            if (!this.openTabs.includes(newConvId)) {
+                this.openTabs.push(newConvId)
+            }
+            this.currentId = newConvId
+            this._saveSession()
+
+            return newConvId
+        },
+
+        // ─── Regenerate from a specific message: fork the conversation up to a user message,
+        // then trigger a new AI reply. Returns the new conversation ID.
+        async forkAndRegenerate(fromMessageId) {
+            const newConvId = await this.forkConversation(fromMessageId)
+            return newConvId
+        },
+
         // ─── loading (per-conversation) ───
         setLoading(val, convId) {
             const cid = convId || this.currentId
@@ -654,6 +797,9 @@ export const useChatStore = defineStore('chat', {
 
         moveConversation(convId, folderId) {
             dbMoveConversation(convId, folderId)
+            if (this._useServerApi()) {
+                convApi.moveToFolder(convId, folderId).catch(() => {})
+            }
             const conv = this.conversations.find(c => c.id === convId)
             if (conv) {
                 conv.folder_id = folderId || null

@@ -7,11 +7,6 @@ const routes = [
     component: () => import('../pages/HomeView.vue')
   },
   {
-    path: '/agent',
-    name: 'agent',
-    component: () => import('../pages/AgentView.vue')
-  },
-  {
     path: '/code',
     name: 'code',
     component: () => import('../pages/CodeView.vue')
@@ -52,6 +47,31 @@ const routes = [
     path: '/mcp-skills',
     name: 'mcp-skills',
     component: () => import('../pages/McpSkillsView.vue')
+  },
+  {
+    path: '/knowledge',
+    name: 'knowledge',
+    component: () => import('../pages/KnowledgeView.vue')
+  },
+  {
+    path: '/workflow',
+    name: 'workflow',
+    component: () => import('../pages/WorkflowListView.vue')
+  },
+  {
+    path: '/workflow/:id',
+    name: 'workflow-editor',
+    component: () => import('../pages/WorkflowEditorView.vue')
+  },
+  {
+    path: '/projects',
+    name: 'projects',
+    component: () => import('../pages/ProjectsView.vue')
+  },
+  {
+    path: '/novels',
+    name: 'novels',
+    component: () => import('../pages/NovelView.vue')
   }
 ]
 

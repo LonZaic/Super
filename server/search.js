@@ -150,39 +150,103 @@ function generateRelaxedQueries(query, queryType) {
   const alts = []
   const cleaned = query.replace(/\s+/g, ' ').trim()
 
-  // Split into segments: named entities vs descriptive terms
-  // Named entity patterns: 2-4 char proper names, quoted strings
-  // Descriptive terms: genre words, time words, locations
-  const DESCRIPTORS = /电影|影片|上映|最近|今天|昨天|今年|202[0-9]|导演|主演|演员|评分|票房|代码|仓库|开源|github|gitee|网站|官网|官方|新闻|最新|报道|消息|访问|出访|国事|会见|会谈/i
+  // ─── Chinese query structural decomposition ───
+  // e.g. "佛山全天候电台" → extract segments → try "佛山 电台", "全天候 电台", "佛山"
+  // Strategy: Chinese queries usually follow [Location][Descriptor][Category].
+  // We extract 2-char sliding windows, group by position (lead/mid/tail), and
+  // try all structurally-sound combinations.
+  const hasChinese = /[一-鿿]/.test(cleaned)
+  if (hasChinese) {
+    const L = cleaned.length
 
-  // Strategy 1: Drop the most specific term (likely the name), keep descriptors
+    // Extract 2-char segments
+    const segs = []
+    for (let i = 0; i <= L - 2; i++) {
+      const s = cleaned.slice(i, i + 2)
+      if (!/[的了是吗呢吧哦嗯哎]/ .test(s)) segs.push(s)
+    }
+    // Also extract 3-char segments (often nouns: "全天候", "奥运会")
+    const segs3 = []
+    for (let i = 0; i <= L - 3; i++) {
+      segs3.push(cleaned.slice(i, i + 3))
+    }
+
+    // Classify by position: lead (first ~30%), mid, tail (last ~30%)
+    const leadEnd = Math.max(2, Math.floor(L * 0.35))
+    const tailStart = Math.ceil(L * 0.65)
+    const leads = segs.filter(s => cleaned.indexOf(s) < leadEnd)
+    const tails = segs.filter(s => cleaned.indexOf(s) >= tailStart - 1)
+    const mids = segs3.filter(s => {
+      const idx = cleaned.indexOf(s)
+      return idx >= leadEnd - 1 && idx < tailStart
+    })
+
+    // Try: lead + tail (e.g. "佛山" + "电台")
+    for (const lead of leads) {
+      for (const tail of tails) {
+        if (lead !== tail) alts.push(lead + ' ' + tail)
+      }
+    }
+    // Try: lead + mid (e.g. "佛山" + "全天候")
+    for (const lead of leads) {
+      for (const mid of mids) {
+        if (lead !== mid && !mid.includes(lead)) alts.push(lead + ' ' + mid)
+      }
+    }
+    // Try: mid alone (e.g. "全天候" — might be a valid search term)
+    for (const mid of mids) alts.push(mid)
+    // Try: tail alone (e.g. "电台")
+    for (const tail of tails) alts.push(tail)
+    // Try: lead alone (e.g. "佛山")
+    for (const lead of leads) alts.push(lead)
+
+    // Try: drop each 3-char mid-segment from the full query
+    for (const mid of mids) {
+      const without = cleaned.replace(mid, '').trim()
+      if (without.length >= 2) alts.push(without)
+    }
+    // Try: drop each 2-char segment that's not in lead/tail
+    for (const seg of segs) {
+      if (!leads.includes(seg) && !tails.includes(seg)) {
+        const without = cleaned.replace(seg, '').trim()
+        if (without.length >= 3) alts.push(without)
+      }
+    }
+  }
+
+  // ─── Original English/space-separated logic ───
+  const DESCRIPTORS = /电影|影片|上映|最近|今天|昨天|今年|202[0-9]|导演|主演|演员|评分|票房|代码|仓库|开源|github|gitee|网站|官网|官方|新闻|最新|报道|消息|访问|出访|国事|会见|会谈/i
   const words = cleaned.split(/\s+/).filter(w => w.length >= 2)
   const descriptors = words.filter(w => DESCRIPTORS.test(w))
   const specifics = words.filter(w => !DESCRIPTORS.test(w))
 
-  // Try: only descriptors (e.g. "电影 潮汕")
   if (descriptors.length > 0 && specifics.length > 0) {
     alts.push(descriptors.join(' '))
   }
-  // Try: specifics + broader context word (e.g. for movie: "情书 电影")
   if (specifics.length > 0) {
     if (queryType === 'movie') alts.push(specifics.join(' ') + ' 电影')
     if (queryType === 'code') alts.push(specifics.join(' ') + ' github')
     if (queryType === 'person') alts.push(specifics.join(' ') + ' 简介')
     if (queryType === 'news' || queryType === 'breaking_news') alts.push(specifics.join(' ') + ' 最新')
   }
-  // Try: only the first specific term (shortest unique identifier)
-  if (specifics.length >= 2) {
-    alts.push(specifics[0])
-  }
-  // Try: add current year for temporal queries
+  if (specifics.length >= 2) alts.push(specifics[0])
   if (queryType === 'news' || queryType === 'breaking_news') {
     alts.push(cleaned + ' ' + new Date().getFullYear())
   }
-  // Fallback: the cleaned query as-is (search engines may have their own correction)
-  alts.push(cleaned)
 
-  return [...new Set(alts.filter(a => a.length > 1 && a !== cleaned))]
+  // ─── Dedup + quality limit ───
+  const seen = new Set()
+  const filtered = []
+  for (const a of alts) {
+    const norm = a.replace(/\s+/g, ' ').trim()
+    if (norm.length < 2 || norm === cleaned || seen.has(norm)) continue
+    seen.add(norm)
+    filtered.push(norm)
+  }
+  // Prefer structured combos (with spaces) over raw drops, limit to 8
+  const withSpaces = filtered.filter(a => a.includes(' '))
+  const noSpaces = filtered.filter(a => !a.includes(' '))
+  return [...withSpaces, ...noSpaces].slice(0, 8)
 }
 
 // ─── Time context injection ───
@@ -1074,23 +1138,19 @@ async function webSearchVerified(query, maxResults = 5) {
     }
   }
 
-  // ─── Stage 2: If all primary results are poor, try alt + fuzzy queries ───
+  // ─── Stage 2: Fast hardcoded fallback (only 3 best alternatives) ───
+  // Note: Hardcoded relaxation is intentionally minimal — the AI itself is now
+  // responsible for creative rephrasing (synonyms, translations, etc.) when
+  // results are poor. We only try the most obviously helpful structural combos.
   if (allResults.length === 0 || isPoorResults(allResults, query)) {
-    console.log('[search:verified] Primary results poor, trying alternative queries')
-    // Try alt queries + relaxed queries (drop specific terms, keep context)
-    const alts = [...new Set([...generateAltQueries(query), ...generateRelaxedQueries(query, queryType)])]
-    for (const alt of alts.slice(0, 6)) {
-      console.log('[search:verified] Alt/relaxed query:', alt)
-      const altResults = await webSearch(alt, maxResults, 'intl')
+    console.log('[search:verified] Primary results poor, trying top-3 alternative queries')
+    const alts = generateRelaxedQueries(query, queryType).slice(0, 3)
+    for (const alt of alts) {
+      console.log('[search:verified] Alt query:', alt)
+      const altResults = await webSearch(alt, maxResults, 'cn')
       if (altResults.length > 0 && !isPoorResults(altResults, alt)) {
         allResults = altResults
-        usedSources = ['www.bing.com (alt/fuzzy query)']
-        break
-      }
-      const altCnResults = await webSearch(alt, maxResults, 'cn')
-      if (altCnResults.length > 0 && !isPoorResults(altCnResults, alt)) {
-        allResults = altCnResults
-        usedSources = ['cn.bing.com (alt/fuzzy query)']
+        usedSources = ['cn.bing.com (structural alt)']
         break
       }
     }
@@ -1126,7 +1186,7 @@ async function webSearchVerified(query, maxResults = 5) {
   let text = `搜索 "${query}" (源: ${sourceLabel}${timeCtx.newsMode ? ', 优先时效性' : ''}):\n`
 
   if (validated.length === 0) {
-    text += `(未找到相关信息。建议：换关键词重试，或检查拼写。)\n`
+    text += `(未找到相关信息。请基于你的语言能力想2-3个同义/更通用的关键词重新搜索——比如"全天候"→"24小时"、"电台"→"广播 FM频率"。)\n`
   } else {
     validated.slice(0, maxResults).forEach((r, i) => {
       const credLabel = r.credibility >= 0.9 ? ' [高可信]' : r.credibility >= 0.7 ? '' : ' [低可信]'

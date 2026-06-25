@@ -91,18 +91,6 @@
                 </div>
             </template>
 
-            <!-- ═══ AI: Agent mode — inline progress + narration ═══ -->
-            <template v-else-if="role === 'ai' && isAgent">
-                <AgentProgress
-                    :events="agentEvents"
-                    :running="!agentDone"
-                    :startTime="agentStartTime"
-                />
-                <!-- AI's narration text (streaming summary) -->
-                <div v-if="text" class="bubble markdown-body" v-html="renderedText"></div>
-                <span v-if="streaming && !text" class="stream-cursor"></span>
-            </template>
-
             <!-- ═══ AI: Device picker (AI requests device selection) ═══ -->
             <template v-else-if="role === 'ai' && devicePicker">
                 <div class="device-pick-msg">
@@ -166,6 +154,142 @@
                     <div ref="liveSvgBody" class="live-svg-body" v-html="liveSvg"></div>
                 </div>
                 <div class="bubble markdown-body" v-html="renderedText"></div>
+
+                <!-- ═══ Image Gallery (图文并发) ═══ -->
+                <div v-if="imageGallery && imageGallery.length" class="image-gallery">
+                    <div
+                        v-for="(img, i) in imageGallery"
+                        :key="'img-' + i"
+                        class="image-gallery-item"
+                    >
+                        <img
+                            :src="img.url"
+                            :alt="img.title"
+                            loading="lazy"
+                            class="gallery-img"
+                            @click="openImageFullscreen(img)"
+                        />
+                        <div class="gallery-caption">
+                            <span class="gallery-title">{{ img.title }}</span>
+                            <span v-if="img.license" class="gallery-license">{{ img.license }}</span>
+                        </div>
+                        <div class="gallery-actions">
+                            <button class="gallery-action-btn" title="下载" @click.stop="downloadImage(img)">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                                    <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                </svg>
+                            </button>
+                            <button v-if="hasSMTP" class="gallery-action-btn" title="邮件发送" @click.stop="$emit('imageSendEmail', { msgId, image: img })">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                                    <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                                    <path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ Image Fullscreen Overlay ═══ -->
+                <Teleport to="body">
+                    <div v-if="fullscreenImage" class="img-fullscreen-overlay" @click="closeImageFullscreen">
+                        <button class="img-fullscreen-close" @click.stop="closeImageFullscreen" title="返回">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
+                        <img
+                            :src="fullscreenImage.url"
+                            :alt="fullscreenImage.title"
+                            class="img-fullscreen-img"
+                            @click.stop
+                        />
+                        <div class="img-fullscreen-actions" @click.stop>
+                            <button class="img-fullscreen-btn" title="下载" @click="downloadImage(fullscreenImage)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                            </button>
+                            <button v-if="hasSMTP" class="img-fullscreen-btn" title="邮件发送" @click="$emit('imageSendEmail', { msgId, image: fullscreenImage })">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7l9 6 9-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </Teleport>
+
+                <!-- ═══ User Choice Card (Claude-style inline interaction) ═══ -->
+                <div v-if="userChoice && !userChoice.answered" class="user-choice-card">
+                    <div class="user-choice-prompt">{{ userChoice.prompt }}</div>
+                    <div class="user-choice-options" :class="{ multi: userChoice.multi }">
+                        <button
+                            v-for="(choice, i) in userChoice.choices"
+                            :key="'choice-' + i"
+                            class="user-choice-btn"
+                            @click="$emit('choiceSelect', { msgId, value: choice.value, label: choice.label })"
+                        >
+                            <span class="choice-label">{{ choice.label }}</span>
+                            <span v-if="choice.desc" class="choice-desc">{{ choice.desc }}</span>
+                        </button>
+                    </div>
+                </div>
+                <div v-else-if="userChoice && userChoice.answered" class="user-choice-card answered">
+                    <div class="user-choice-prompt">{{ userChoice.prompt }}</div>
+                    <div class="user-choice-selected">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                            <path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>{{ userChoice.selected }}</span>
+                    </div>
+                </div>
+
+                <!-- ═══ File Confirmation Dialog (管理电脑 mode) ═══ -->
+                <div v-if="fileConfirm && !fileConfirm.confirmed && !fileConfirm.cancelled" class="file-confirm-card">
+                    <div class="file-confirm-header">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                            <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7l-2-2H5a2 2 0 0 0-2 2z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span class="file-confirm-title">找到以下文件，是不是这些？</span>
+                    </div>
+                    <div class="file-confirm-list">
+                        <label
+                            v-for="(f, i) in fileConfirm.files"
+                            :key="'fc-' + i"
+                            class="file-confirm-item"
+                            :class="{ checked: fileConfirmSelected.includes(f.path) }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="fileConfirmSelected.includes(f.path)"
+                                @change="toggleFileConfirm(f)"
+                            />
+                            <svg class="file-confirm-icon" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M14 2v6h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <div class="file-confirm-info">
+                                <span class="file-confirm-name">{{ f.name }}</span>
+                                <span class="file-confirm-path">{{ f.path }}</span>
+                            </div>
+                            <span v-if="f.size" class="file-confirm-size">{{ f.size }}</span>
+                        </label>
+                    </div>
+                    <div class="file-confirm-actions">
+                        <button class="file-confirm-btn primary" @click="approveFileConfirm">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                                <path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            是这些
+                        </button>
+                        <button class="file-confirm-btn" @click="$emit('fileConfirmCancel', { msgId })">
+                            不是
+                        </button>
+                    </div>
+                </div>
+                <div v-else-if="fileConfirm && fileConfirm.confirmed" class="file-confirm-card answered">
+                    <div class="file-confirm-header">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                            <path d="M5 12l5 5L20 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span class="file-confirm-title">已确认 {{ fileConfirm.selected.length }} 个文件</span>
+                    </div>
+                </div>
+
                 <!-- Side Quest (侧边提问) — non-streaming AI replies only -->
                 <SideQuestBox
                     v-if="role === 'ai' && !streaming && text"
@@ -279,6 +403,14 @@
                         <path d="M9.5 1.5a1 1 0 0 1 1.41 0l.59.59a1 1 0 0 1 0 1.41L5 10l-2.5.5L3 8l6.5-6.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
                       </svg>
                     </button>
+                    <button :title="'从此处分叉新对话'" @click="$emit('fork')">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                        <circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="6" cy="18" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                        <circle cx="18" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M8.5 6H14a2 2 0 0 1 2 2v1.5M8.5 18H14a2 2 0 0 0 2-2v-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </button>
                     <button :title="t('delete')" class="del" @click="$emit('delete')">
                       <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                         <path d="M2.5 3.5h8M4.5 3.5V2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5M2 3.5h9v.5a.5.5 0 0 1-.5.5h-.5l-.4 6a.5.5 0 0 1-.5.5H3.9a.5.5 0 0 1-.5-.5l-.4-6H2.5a.5.5 0 0 1-.5-.5V3.5z" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
@@ -319,7 +451,6 @@ import { loadFile } from '../utils/fileDB.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
 import { guessDeviceType, DEVICES } from '../utils/designPreview.js'
 import { useI18n } from '../composables/useI18n.js'
-import AgentProgress from './chat/AgentProgress.vue'
 import SideQuestBox from './chat/SideQuestBox.vue'
 import { animateSvgStrokes } from '../utils/svgAnimator.js'
 import { getCollections, saveItem, isItemDuplicate } from '../db/database.js'
@@ -338,7 +469,6 @@ const props = defineProps({
     streaming: { type: Boolean, default: false },
     siblingCount: { type: Number, default: 1 },
     siblingIndex: { type: Number, default: 1 },
-    agentEvents: { type: Array, default: () => [] },
     devicePicker: { type: Boolean, default: false },
     designSummary: { type: String, default: '' },
     yammyActive: { type: Boolean, default: false },
@@ -348,9 +478,12 @@ const props = defineProps({
     liveSvg: { type: String, default: '' },
     sideQuest: { type: Object, default: null },
     sideQuestLoading: { type: Boolean, default: false },
+    imageGallery: { type: Array, default: () => [] },
+    userChoice: { type: Object, default: null },
+    fileConfirm: { type: Object, default: null },
 })
 
-defineEmits(['regenerate', 'edit', 'delete', 'prevBranch', 'nextBranch', 'pickDevice', 'notDesign', 'yammyClick', 'previewFile', 'askZip', 'sideQuestAsk', 'sideQuestDelete'])
+const emit = defineEmits(['regenerate', 'edit', 'delete', 'prevBranch', 'nextBranch', 'fork', 'pickDevice', 'notDesign', 'yammyClick', 'previewFile', 'askZip', 'sideQuestAsk', 'sideQuestDelete', 'choiceSelect', 'fileConfirmApprove', 'fileConfirmCancel', 'imageSendEmail'])
 
 // ═══ Copy feedback ═══
 const copyDone = ref(false)
@@ -622,22 +755,62 @@ const thinkingOpen = ref(false)
 const userToggled = ref(false)
 const showRaw = ref(false)
 
-const isAgent = computed(() => {
-  return props.agentEvents && props.agentEvents.length > 0
-})
+// ═══ Image gallery methods ═══
+const fullscreenImage = ref(null)
 
-const agentDone = computed(() => {
-  const evts = props.agentEvents || []
-  return evts.some(e => e.type === 'done' || e.type === 'final' || e.type === 'error' || e.type === 'aborted')
-})
+function openImageFullscreen(img) {
+  fullscreenImage.value = img
+}
 
-// Extract start time from events (set by ChatView as first event)
-const agentStartTime = computed(() => {
-  const evts = props.agentEvents || []
-  for (const e of evts) {
-    if (e._startTime) return e._startTime
+function closeImageFullscreen() {
+  fullscreenImage.value = null
+}
+
+async function downloadImage(img) {
+  try {
+    const res = await fetch(img.url)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = (img.title || 'image').replace(/[^\w\u4e00-\u9fa5.-]/g, '_') + '.jpg'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    // Fallback: open in new tab
+    window.open(img.url, '_blank')
   }
-  return 0
+}
+
+// ═══ File confirmation methods ═══
+const fileConfirmSelected = ref([])
+
+function toggleFileConfirm(f) {
+  const idx = fileConfirmSelected.value.indexOf(f.path)
+  if (idx >= 0) {
+    fileConfirmSelected.value.splice(idx, 1)
+  } else {
+    fileConfirmSelected.value.push(f.path)
+  }
+}
+
+function approveFileConfirm() {
+  const selected = (props.fileConfirm?.files || []).filter(f => fileConfirmSelected.value.includes(f.path))
+  if (selected.length === 0) {
+    // If none selected, default to all
+    const all = (props.fileConfirm?.files || []).map(f => ({ path: f.path, name: f.name }))
+    emit('fileConfirmApprove', { msgId: props.msgId, selectedFiles: all })
+  } else {
+    emit('fileConfirmApprove', { msgId: props.msgId, selectedFiles: selected.map(f => ({ path: f.path, name: f.name })) })
+  }
+}
+
+// ═══ SMTP availability (for showing email button on images) ═══
+const hasSMTP = computed(() => {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('smtp_config') || '{}')
+    return !!(cfg.host && cfg.user && cfg.pass)
+  } catch { return false }
 })
 
 watch(() => props.reasoning, (val) => {
@@ -830,12 +1003,12 @@ async function copyText() {
 .msg {
     display: flex;
     align-items: flex-start;
-    max-width: 78%;
+    max-width: 82%;
     padding: 6px 0;
 }
 .msg.user {
     margin-left: auto;
-    max-width: 65%;
+    max-width: 82%;
     justify-content: flex-end;
 }
 .body { position: relative; min-width: 0; }
@@ -1244,6 +1417,304 @@ async function copyText() {
     max-width: 100%;
     max-height: 380px;
     height: auto;
+}
+
+/* ═══ Image Gallery (图文并发) ═══ */
+.image-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    margin: 10px 0 6px;
+    width: 100%;
+}
+.image-gallery-item {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--bg-secondary, #f5f5f5);
+    border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.image-gallery-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+}
+.gallery-img {
+    width: 100%;
+    height: 220px;
+    object-fit: cover;
+    cursor: pointer;
+    display: block;
+    background: #eee;
+}
+/* Caption removed — no white section below image */
+.gallery-caption {
+    display: none;
+}
+.gallery-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.image-gallery-item:hover .gallery-actions { opacity: 1; }
+.gallery-action-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 7px;
+    background: rgba(255,255,255,0.92);
+    color: #555;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+.gallery-action-btn:hover { background: #fff; color: #1a73e8; }
+
+/* ═══ Image Fullscreen Overlay ═══ */
+.img-fullscreen-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.92);
+    backdrop-filter: blur(8px);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.img-fullscreen-img {
+    max-width: 92vw;
+    max-height: 88vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.img-fullscreen-close {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, transform 0.15s;
+    z-index: 100000;
+}
+.img-fullscreen-close:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: scale(1.05);
+}
+.img-fullscreen-actions {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(12px);
+    border-radius: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.img-fullscreen-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+.img-fullscreen-btn:hover { background: rgba(255, 255, 255, 0.3); }
+
+/* ═══ User Choice Card (Claude-style inline interaction) ═══ */
+.user-choice-card {
+    margin: 10px 0 6px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--bg-secondary, #f8f9fa);
+    border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+    width: 100%;
+}
+.user-choice-card.answered {
+    background: var(--bg-tertiary, #f0f0f0);
+    opacity: 0.75;
+}
+.user-choice-prompt {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #333);
+    margin-bottom: 10px;
+}
+.user-choice-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.user-choice-options.multi {
+    flex-direction: column;
+}
+.user-choice-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, rgba(0,0,0,0.12));
+    border-radius: 8px;
+    background: var(--bg, #fff);
+    color: var(--text-primary, #333);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s;
+    font-size: 13px;
+}
+.user-choice-btn:hover {
+    border-color: #1a73e8;
+    background: rgba(26,115,232,0.06);
+    transform: translateX(2px);
+}
+.choice-label { font-weight: 500; }
+.choice-desc { font-size: 11px; color: var(--text-tertiary, #999); }
+.user-choice-selected {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #1a73e8;
+    font-weight: 500;
+}
+
+/* ═══ File Confirmation Dialog (管理电脑 mode) ═══ */
+.file-confirm-card {
+    margin: 10px 0 6px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--bg-secondary, #f8f9fa);
+    border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+    width: 100%;
+}
+.file-confirm-card.answered {
+    background: var(--bg-tertiary, #f0f0f0);
+    opacity: 0.75;
+}
+.file-confirm-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    color: var(--text-primary, #333);
+}
+.file-confirm-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+.file-confirm-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.file-confirm-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color, rgba(0,0,0,0.08));
+    border-radius: 8px;
+    background: var(--bg, #fff);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.file-confirm-item:hover {
+    border-color: rgba(26,115,232,0.4);
+}
+.file-confirm-item.checked {
+    border-color: #1a73e8;
+    background: rgba(26,115,232,0.06);
+}
+.file-confirm-item input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: #1a73e8;
+}
+.file-confirm-icon {
+    flex-shrink: 0;
+    color: var(--text-tertiary, #999);
+}
+.file-confirm-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.file-confirm-name {
+    font-size: 13px;
+    color: var(--text-primary, #333);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.file-confirm-path {
+    font-size: 11px;
+    color: var(--text-tertiary, #999);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.file-confirm-size {
+    font-size: 11px;
+    color: var(--text-tertiary, #999);
+    flex-shrink: 0;
+}
+.file-confirm-actions {
+    display: flex;
+    gap: 8px;
+}
+.file-confirm-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 7px 14px;
+    border: 1px solid var(--border-color, rgba(0,0,0,0.15));
+    border-radius: 8px;
+    background: var(--bg, #fff);
+    color: var(--text-primary, #333);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+}
+.file-confirm-btn:hover {
+    border-color: #1a73e8;
+    color: #1a73e8;
+}
+.file-confirm-btn.primary {
+    background: #1a73e8;
+    color: #fff;
+    border-color: #1a73e8;
+}
+.file-confirm-btn.primary:hover {
+    background: #1557b0;
 }
 
 </style>

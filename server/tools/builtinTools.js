@@ -161,6 +161,69 @@ const BUILTIN_DEFS = [
       }
     }
   },
+
+  // ── Update Plan (CC-style TodoWrite) ──
+  // 让 agent 输出/更新任务计划，前端在小条子里展示
+  {
+    type: 'function',
+    function: {
+      name: 'update_plan',
+      description: '更新当前任务计划。用于复杂任务分步执行时展示进度。用户会在小条子里看到计划。第一次调用创建计划，后续调用更新状态。',
+      parameters: {
+        type: 'object',
+        properties: {
+          plan: {
+            type: 'array',
+            description: '计划步骤列表',
+            items: {
+              type: 'object',
+              properties: {
+                step: { type: 'string', description: '步骤名称，简短，如"读取配置文件"' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: '步骤状态' }
+              },
+              required: ['step', 'status']
+            }
+          },
+          summary: { type: 'string', description: '当前进度的简短说明（可选）' }
+        },
+        required: ['plan']
+      }
+    }
+  },
+
+  // ── Save Memory (持续记忆) ──
+  // 让 agent 主动存入关键发现到共享记忆
+  {
+    type: 'function',
+    function: {
+      name: 'save_memory',
+      description: '保存关键信息到共享记忆，供其他 Agent 和未来会话使用。用于存储重要发现、决策、配置等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: '记忆键名，简短，如"用户偏好"、"项目结构"' },
+          value: { type: 'string', description: '记忆内容' },
+          type: { type: 'string', enum: ['fact', 'decision', 'preference', 'finding'], description: '记忆类型' }
+        },
+        required: ['key', 'value']
+      }
+    }
+  },
+
+  // ── Read Memory (共享上下文) ──
+  {
+    type: 'function',
+    function: {
+      name: 'read_memory',
+      description: '读取共享记忆。可读取全部或指定键。用于了解其他 Agent 的发现和过去会话的记忆。',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: '指定键名（可选，不填则返回全部）' }
+        }
+      }
+    }
+  },
 ]
 
 // ─── Executor ───

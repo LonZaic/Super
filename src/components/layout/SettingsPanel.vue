@@ -5,7 +5,13 @@
       <div class="sp-panel">
         <!-- Header -->
         <div class="sp-hdr">
-          <h2 class="sp-title">设置</h2>
+          <div class="sp-hdr-left">
+            <svg class="sp-hdr-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h2 class="sp-title">设置</h2>
+          </div>
           <button class="sp-close" @click="$emit('close')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
               <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -13,47 +19,67 @@
           </button>
         </div>
 
-        <!-- Tabs -->
-        <div class="sp-tabs">
-          <button :class="['sp-tab', { active: tab === 'api' }]" @click="tab = 'api'">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-              <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-              <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-              <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-            </svg>
-            API 密钥
-          </button>
-          <button :class="['sp-tab', { active: tab === 'email' }]" @click="tab = 'email'">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <rect x="2" y="4" width="20" height="16" rx="3" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M2 6l10 8 10-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            邮箱
-          </button>
-          <button :class="['sp-tab', { active: tab === 'lang' }]" @click="tab = 'lang'">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.3"/>
-              <ellipse cx="12" cy="12" rx="4" ry="9" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M3 12h18M12 3v18" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
-            </svg>
-            {{ t('switchLang') }}
-          </button>
-          <button :class="['sp-tab', { active: tab === 'theme' }]" @click="tab = 'theme'">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M12 3a9 9 0 0 0 0 18c-4.5 0-8-4-8-9s3.5-9 8-9z" fill="currentColor"/>
-            </svg>
-            {{ t('appearance') }}
-          </button>
-          <button :class="['sp-tab', { active: tab === 'data' }]" @click="tab = 'data'">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.3"/>
-              <path d="M12 7v5l3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            </svg>
-            数据
-          </button>
-        </div>
+        <!-- Two-column layout: sidebar nav + content -->
+        <div class="sp-main">
+          <!-- Sidebar Nav -->
+          <nav class="sp-nav">
+            <button :class="['sp-nav-item', { active: tab === 'api' }]" @click="tab = 'api'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+              </svg>
+              <span>API 密钥</span>
+              <span v-if="apiKeySet || dsKeyMode === 'builtin'" class="sp-nav-dot" :class="{ ok: apiKeySet || dsKeyMode === 'builtin' }"></span>
+            </button>
+            <button :class="['sp-nav-item', { active: tab === 'email' }]" @click="tab = 'email'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <rect x="2" y="4" width="20" height="16" rx="3" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M2 6l10 8 10-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>邮箱</span>
+              <span v-if="smtpSet" class="sp-nav-dot ok"></span>
+            </button>
+            <button :class="['sp-nav-item', { active: tab === 'inbox' }]" @click="tab = 'inbox'; loadInboxSources()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M3 13h4l2 3h6l2-3h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M5 5l14 0a2 2 0 0 1 2 2v6l-3 3H6l-3-3V7a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+              </svg>
+              <span>信息源</span>
+              <span v-if="inboxSources.length" class="sp-nav-dot ok"></span>
+            </button>
+            <button :class="['sp-nav-item', { active: tab === 'memory' }]" @click="tab = 'memory'; loadMemories()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3C7 3 3 6 3 10c0 2 1 4 3 5v4l3-2c1 .3 2 .4 3 .4 5 0 9-3 9-7s-4-7-9-7z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                <path d="M9 10h6M9 13h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <span>记忆</span>
+              <span v-if="memoryEnabled" class="sp-nav-dot ok"></span>
+            </button>
+            <button :class="['sp-nav-item', { active: tab === 'lang' }]" @click="tab = 'lang'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.3"/>
+                <ellipse cx="12" cy="12" rx="4" ry="9" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M3 12h18M12 3v18" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+              </svg>
+              <span>{{ t('switchLang') }}</span>
+            </button>
+            <button :class="['sp-nav-item', { active: tab === 'theme' }]" @click="tab = 'theme'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M12 3a9 9 0 0 0 0 18c-4.5 0-8-4-8-9s3.5-9 8-9z" fill="currentColor"/>
+              </svg>
+              <span>{{ t('appearance') }}</span>
+            </button>
+            <button :class="['sp-nav-item', { active: tab === 'data' }]" @click="tab = 'data'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M12 7v5l3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              <span>数据</span>
+            </button>
+          </nav>
 
         <!-- Content -->
         <div class="sp-body">
@@ -250,6 +276,114 @@
             </div>
           </template>
 
+          <!-- ═══ Inbox Sources Tab — Information Agent ═══ -->
+          <template v-if="tab === 'inbox'">
+            <p class="sp-sub">配置信息源，AI 可作为你的信息代理：读取邮箱/飞书/GitHub/RSS 等消息，并帮你总结、回复、群发。</p>
+
+            <!-- Add new source -->
+            <div class="sp-key-group">
+              <div class="sp-key-hdr">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <span>添加信息源</span>
+              </div>
+              <div class="sp-field">
+                <label class="sp-label">选择类型</label>
+                <select v-model="inboxNewType" class="sp-input" @change="onInboxTypeChange">
+                  <option value="">— 选择信息源类型 —</option>
+                  <option v-for="(meta, key) in inboxTypes" :key="key" :value="key">{{ meta.name }} — {{ meta.description }}</option>
+                </select>
+              </div>
+              <template v-if="inboxNewType && inboxTypes[inboxNewType]">
+                <div class="sp-field">
+                  <label class="sp-label">名称</label>
+                  <input v-model="inboxNewName" class="sp-input" :placeholder="inboxTypes[inboxNewType].name" />
+                </div>
+                <div class="sp-field" v-for="f in inboxTypes[inboxNewType].fields" :key="f.key">
+                  <label class="sp-label">{{ f.label }}<span v-if="f.required" style="color:var(--danger)">*</span></label>
+                  <input v-model="inboxNewConfig[f.key]" :type="f.type || 'text'" class="sp-input" :placeholder="f.placeholder || ''" />
+                </div>
+                <button class="sp-save-btn" @click="addInboxSource">{{ inboxSaving ? '添加中...' : '添加信息源' }}</button>
+                <span v-if="inboxMsg" :class="['sp-msg', inboxMsgOk ? 'ok' : 'fail']">{{ inboxMsg }}</span>
+              </template>
+            </div>
+
+            <!-- Existing sources list -->
+            <div class="sp-key-group" v-if="inboxSources.length">
+              <div class="sp-key-hdr">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                </svg>
+                <span>已配置的信息源 ({{ inboxSources.length }})</span>
+              </div>
+              <div v-for="s in inboxSources" :key="s.id" class="sp-inbox-item">
+                <div class="sp-inbox-info">
+                  <span class="sp-inbox-name">{{ s.name }}</span>
+                  <span class="sp-inbox-type">{{ inboxTypes[s.type]?.name || s.type }}</span>
+                  <span :class="['sp-key-status', s.enabled ? 'ok' : 'no']">{{ s.enabled ? '启用' : '已禁用' }}</span>
+                </div>
+                <div class="sp-inbox-actions">
+                  <button class="sp-inbox-btn" @click="toggleInboxSource(s)" :title="s.enabled ? '禁用' : '启用'">
+                    <svg v-if="s.enabled" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.3"/>
+                    </svg>
+                    <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.3"/>
+                    </svg>
+                  </button>
+                  <button class="sp-inbox-btn danger" @click="deleteInboxSource(s.id)" title="删除">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="!inboxLoading" class="sp-empty-hint">
+              还没有配置任何信息源。在上方添加邮箱、飞书、GitHub、RSS 等信息源，AI 就能帮你读取和回复消息了。
+            </div>
+          </template>
+
+          <!-- ═══ Memory Tab ═══ -->
+          <template v-if="tab === 'memory'">
+            <p class="sp-sub">AI 会跨对话记住你的偏好、事实和重要信息，提供更个性化的回答。你可以随时开关或管理记忆。</p>
+
+            <!-- Toggle -->
+            <div class="sp-key-group">
+              <div class="sp-key-row">
+                <div>
+                  <div class="sp-key-label">持久记忆</div>
+                  <div class="sp-key-hint">开启后，AI 会自动记住你透露的重要信息，并在后续对话中运用</div>
+                </div>
+                <button :class="['sp-toggle', { on: memoryEnabled }]" @click="toggleMemory">
+                  <span class="sp-toggle-knob"></span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Memory list -->
+            <div class="sp-key-group" v-if="memoryEnabled">
+              <div class="sp-key-row" style="justify-content: space-between;">
+                <span class="sp-key-label">已保存的记忆 ({{ memories.length }})</span>
+                <button v-if="memories.length" class="sp-inbox-btn danger" @click="clearAllMemories">清空全部</button>
+              </div>
+              <div v-if="memories.length" class="sp-memory-list">
+                <div v-for="m in memories" :key="m.id" class="sp-memory-item">
+                  <span class="sp-memory-cat">{{ memoryCatLabel(m.category) }}</span>
+                  <span class="sp-memory-content">{{ m.content }}</span>
+                  <button class="sp-inbox-btn danger" @click="deleteMemory(m.id)" title="删除">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div v-else class="sp-empty-hint">
+                还没有记忆。和 AI 聊天时透露你的偏好、姓名、职业等，AI 会自动记住。
+              </div>
+            </div>
+          </template>
+
           <!-- ═══ Language Tab ═══ -->
           <template v-if="tab === 'lang'">
             <p class="sp-sub">选择界面语言。</p>
@@ -338,6 +472,7 @@
             <span v-if="dataMsg" :class="['sp-msg', dataMsgOk ? 'ok' : 'fail']">{{ dataMsg }}</span>
           </template>
         </div>
+        </div>
       </div>
     </div>
   </Transition>
@@ -350,6 +485,7 @@ import { useSettingsStore } from '../../stores/settingsStore.js'
 import { loadSMTPConfig, saveSMTPConfig } from '../../utils/email.js'
 import { conversations as convApi } from '../../api/index.js'
 import { useI18n } from '../../composables/useI18n.js'
+import { getMemories, deleteMemory as dbDeleteMemory, clearMemories } from '../../db/database.js'
 
 const props = defineProps({ visible: Boolean })
 const emit = defineEmits(['close'])
@@ -410,6 +546,134 @@ const smtpSaving = ref(false)
 const smtpMsg = ref('')
 const smtpMsgOk = ref(false)
 const smtpSet = ref(false)
+
+// ── Inbox Sources (Information Agent) ──
+const inboxTypes = ref({})
+const inboxSources = ref([])
+const inboxLoading = ref(false)
+const inboxNewType = ref('')
+const inboxNewName = ref('')
+const inboxNewConfig = ref({})
+const inboxSaving = ref(false)
+const inboxMsg = ref('')
+
+// ── Memory (Persistent cross-conversation memory) ──
+const memoryEnabled = ref(localStorage.getItem('memory_enabled') === 'true')
+const memories = ref([])
+
+function loadMemories() {
+  try { memories.value = getMemories() } catch { memories.value = [] }
+}
+
+function toggleMemory() {
+  memoryEnabled.value = !memoryEnabled.value
+  localStorage.setItem('memory_enabled', memoryEnabled.value ? 'true' : 'false')
+  if (memoryEnabled.value) loadMemories()
+}
+
+function memoryCatLabel(cat) {
+  const map = { fact: '事实', preference: '偏好', project: '项目', decision: '决定', contact: '联系人' }
+  return map[cat] || cat || '事实'
+}
+
+function deleteMemory(id) {
+  dbDeleteMemory(id)
+  loadMemories()
+}
+
+function clearAllMemories() {
+  if (!confirm('确定清空所有记忆吗？此操作不可恢复。')) return
+  clearMemories()
+  loadMemories()
+}
+const inboxMsgOk = ref(false)
+
+async function loadInboxTypes() {
+  try {
+    const res = await fetch('/api/inbox/types')
+    const data = await res.json()
+    if (data.success) inboxTypes.value = data.data || {}
+  } catch {}
+}
+
+async function loadInboxSources() {
+  if (!Object.keys(inboxTypes.value).length) await loadInboxTypes()
+  inboxLoading.value = true
+  try {
+    const res = await fetch('/api/inbox/sources')
+    const data = await res.json()
+    if (data.success) inboxSources.value = data.data || []
+  } catch {} finally {
+    inboxLoading.value = false
+  }
+}
+
+function onInboxTypeChange() {
+  inboxNewConfig.value = {}
+  inboxNewName.value = ''
+  const meta = inboxTypes.value[inboxNewType.value]
+  if (meta?.fields) {
+    for (const f of meta.fields) {
+      if (f.default) inboxNewConfig.value[f.key] = f.default
+    }
+  }
+}
+
+async function addInboxSource() {
+  const meta = inboxTypes.value[inboxNewType.value]
+  if (!meta) { inboxMsg.value = '请选择信息源类型'; inboxMsgOk.value = false; return }
+  // Validate required fields
+  for (const f of meta.fields) {
+    if (f.required && !inboxNewConfig.value[f.key]) {
+      inboxMsg.value = `请填写 ${f.label}`; inboxMsgOk.value = false; return
+    }
+  }
+  inboxSaving.value = true
+  inboxMsg.value = ''
+  try {
+    const res = await fetch('/api/inbox/sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: inboxNewType.value,
+        name: inboxNewName.value || meta.name,
+        config: { ...inboxNewConfig.value },
+        enabled: true,
+      }),
+    })
+    const data = await res.json()
+    if (data.success) {
+      inboxMsg.value = '添加成功'; inboxMsgOk.value = true
+      inboxNewType.value = ''; inboxNewName.value = ''; inboxNewConfig.value = {}
+      await loadInboxSources()
+    } else {
+      inboxMsg.value = data.error?.message || '添加失败'; inboxMsgOk.value = false
+    }
+  } catch (e) {
+    inboxMsg.value = e.message; inboxMsgOk.value = false
+  } finally {
+    inboxSaving.value = false
+  }
+}
+
+async function toggleInboxSource(s) {
+  try {
+    await fetch(`/api/inbox/sources/${s.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...s, enabled: !s.enabled }),
+    })
+    await loadInboxSources()
+  } catch {}
+}
+
+async function deleteInboxSource(id) {
+  if (!confirm('确定删除这个信息源？')) return
+  try {
+    await fetch(`/api/inbox/sources/${id}`, { method: 'DELETE' })
+    await loadInboxSources()
+  } catch {}
+}
 
 // ── Data ──
 const exporting = ref(false)
@@ -604,9 +868,9 @@ async function doImport(e) {
 
 <style scoped>
 .sp-overlay { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; justify-content: flex-end; }
-.sp-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+.sp-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }
 .sp-panel {
-  position: relative; width: 420px; max-width: 92vw; height: 100vh; height: 100dvh;
+  position: relative; width: 560px; max-width: 96vw; height: 100vh; height: 100dvh;
   background: var(--bg2); border-left: 1px solid var(--border2);
   display: flex; flex-direction: column;
   box-shadow: -8px 0 32px rgba(0,0,0,.3);
@@ -615,34 +879,61 @@ async function doImport(e) {
 /* Header */
 .sp-hdr {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  padding: 16px 22px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  background: var(--bg2);
 }
-.sp-title { font-size: 17px; font-weight: 500; color: var(--text); margin: 0; }
+.sp-hdr-left { display: flex; align-items: center; gap: 10px; }
+.sp-hdr-icon { color: var(--text3); }
+.sp-title { font-size: 16px; font-weight: 600; color: var(--text); margin: 0; letter-spacing: 0.2px; }
 .sp-close {
-  width: 30px; height: 30px; border-radius: 8px;
+  width: 32px; height: 32px; border-radius: 8px;
   border: none; background: transparent; color: var(--text3);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all .12s;
 }
 .sp-close:hover { background: var(--bg3); color: var(--text2); }
 
-/* Tabs */
-.sp-tabs {
-  display: flex; gap: 0; padding: 0 20px;
-  border-bottom: 1px solid var(--border); flex-shrink: 0;
+/* Two-column main layout */
+.sp-main {
+  flex: 1; display: flex; min-height: 0;
 }
-.sp-tab {
-  display: flex; align-items: center; gap: 6px;
-  padding: 10px 14px; border: none; background: transparent;
-  color: var(--text3); font-size: 12px; font-family: inherit; font-weight: 400;
+
+/* Sidebar Nav */
+.sp-nav {
+  width: 180px; flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 12px 8px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg2);
+  overflow-y: auto;
+}
+.sp-nav::-webkit-scrollbar { width: 4px; }
+.sp-nav::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
+.sp-nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: none; background: transparent;
+  color: var(--text3); font-size: 13px; font-family: inherit; font-weight: 500;
   cursor: pointer; transition: all .12s;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  border-radius: 8px; text-align: left; width: 100%;
+  position: relative;
 }
-.sp-tab:hover { color: var(--text2); background: var(--bg3); }
-.sp-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.sp-nav-item:hover { background: var(--bg3); color: var(--text2); }
+.sp-nav-item.active {
+  background: var(--bg3); color: var(--accent);
+}
+.sp-nav-item.active::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; background: var(--accent); border-radius: 0 2px 2px 0;
+}
+.sp-nav-item span:first-of-type { flex: 1; }
+.sp-nav-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text4); flex-shrink: 0;
+}
+.sp-nav-dot.ok { background: #22c55e; }
 
 /* Body */
-.sp-body { flex: 1; overflow-y: auto; padding: 16px 20px 32px; }
+.sp-body { flex: 1; overflow-y: auto; padding: 20px 24px 40px; min-width: 0; }
 .sp-body::-webkit-scrollbar { width: 4px; }
 .sp-body::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
 .sp-sub { font-size: 12px; color: var(--text3); font-weight: 300; line-height: 1.5; margin: 0 0 16px; }
@@ -682,6 +973,57 @@ async function doImport(e) {
 .sp-key-status.ok { color: var(--green); background: rgba(63,185,80,0.10); }
 .sp-key-status.no { color: var(--text3); background: var(--bg4); }
 
+/* Inbox source items */
+.sp-inbox-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; margin-bottom: 8px;
+}
+.sp-inbox-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.sp-inbox-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.sp-inbox-type { font-size: 11px; color: var(--text3); padding: 2px 8px; background: var(--bg4); border-radius: var(--radius-full); }
+.sp-inbox-actions { display: flex; gap: 6px; }
+.sp-inbox-btn {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text2); cursor: pointer; transition: all 0.15s;
+}
+.sp-inbox-btn:hover { background: var(--bg4); color: var(--text); }
+.sp-inbox-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+.sp-empty-hint {
+  padding: 24px 16px; text-align: center; color: var(--text3);
+  font-size: 13px; line-height: 1.6; background: var(--bg2);
+  border: 1px dashed var(--border); border-radius: 8px;
+}
+
+/* Memory toggle */
+.sp-toggle {
+  width: 40px; height: 22px; border-radius: 11px;
+  background: var(--bg4); border: 1px solid var(--border);
+  position: relative; cursor: pointer; transition: background 0.2s;
+  flex-shrink: 0;
+}
+.sp-toggle.on { background: #5b8def; border-color: #5b8def; }
+.sp-toggle-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.sp-toggle.on .sp-toggle-knob { transform: translateX(18px); }
+
+/* Memory list */
+.sp-memory-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.sp-memory-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: var(--bg3); border-radius: 8px;
+}
+.sp-memory-cat {
+  font-size: 11px; color: #5b8def; background: rgba(91,141,239,0.12);
+  padding: 2px 8px; border-radius: 10px; flex-shrink: 0; font-weight: 500;
+}
+.sp-memory-content { flex: 1; font-size: 13px; color: var(--text); line-height: 1.5; }
+
 /* Input row */
 .sp-key-input {
   display: flex; align-items: center; gap: 6px;
@@ -716,7 +1058,15 @@ async function doImport(e) {
 .sp-field { margin-bottom: 10px; }
 .sp-label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; }
 .sp-row { display: flex; gap: 10px; }
-select.sp-input { font-family: inherit; cursor: pointer; }
+select.sp-input {
+  font-family: inherit; cursor: pointer;
+  display: block; width: 100%; box-sizing: border-box;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 10px; margin-bottom: 0;
+  flex: none; color: var(--text);
+}
+select.sp-input:focus { border-color: var(--accent); outline: none; }
+select.sp-input option { background: var(--bg2); color: var(--text); padding: 6px; }
 
 /* Language */
 .sp-lang-list { display: flex; flex-direction: column; gap: 6px; }

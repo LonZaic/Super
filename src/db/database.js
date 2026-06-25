@@ -176,6 +176,37 @@ export async function initDB() {
             created_at TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS
+        user_memory (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            content     TEXT NOT NULL,
+            category    TEXT DEFAULT 'fact',
+            source_conv TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS
+        projects (
+            id           TEXT PRIMARY KEY,
+            name         TEXT NOT NULL DEFAULT '新项目',
+            instructions TEXT DEFAULT '',
+            knowledge_ids TEXT DEFAULT '[]',
+            color        TEXT DEFAULT '#5b8def',
+            created_at   TEXT DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS
+        canvas_docs (
+            id          TEXT PRIMARY KEY,
+            conv_id     TEXT NOT NULL,
+            title       TEXT DEFAULT '未命名文档',
+            type        TEXT DEFAULT 'document',
+            content     TEXT DEFAULT '',
+            language    TEXT DEFAULT '',
+            created_at  TEXT DEFAULT (datetime('now','localtime')),
+            updated_at  TEXT DEFAULT (datetime('now','localtime'))
+        );
     `)
 
     // ─── Column migrations ───
@@ -187,6 +218,7 @@ export async function initDB() {
         }
     }
     addCol('parent_id', 'INTEGER')
+    addCol('files', "TEXT DEFAULT '[]'")
     addCol('designs', "TEXT DEFAULT '[]'")
     addCol('reasoning', "TEXT DEFAULT ''")
     addCol('side_quest', "TEXT DEFAULT ''")
@@ -200,6 +232,7 @@ export async function initDB() {
     }
     addCcCol('folder_id', 'TEXT')
     addCcCol('sort_order', 'INTEGER DEFAULT 0')
+    addCcCol('project_id', 'TEXT')
 
     const cmCols = db.exec("PRAGMA table_info('code_messages')")
     const cmColNames = cmCols.length ? cmCols[0].values.map(r => r[1]) : []
@@ -594,4 +627,138 @@ export async function importDB(file) {
     window[DB_KEY] = db
     saveDB()
     return true
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Memory — persistent cross-conversation user memory
+// ═══════════════════════════════════════════════════════════════════════
+
+export function getMemories() {
+    const stmt = db.prepare('SELECT * FROM user_memory ORDER BY created_at DESC')
+    const rows = []
+    while (stmt.step()) rows.push(stmt.getAsObject())
+    stmt.free()
+    return rows
+}
+
+export function searchMemories(query) {
+    const stmt = db.prepare(`SELECT * FROM user_memory WHERE content LIKE ? ORDER BY created_at DESC LIMIT 20`)
+    stmt.bind(`%${query}%`)
+    const rows = []
+    while (stmt.step()) rows.push(stmt.getAsObject())
+    stmt.free()
+    return rows
+}
+
+export function addMemory(content, category = 'fact', sourceConv = '') {
+    db.run('INSERT INTO user_memory (content, category, source_conv) VALUES (?, ?, ?)', [content, category, sourceConv])
+    saveDB()
+    return db.exec('SELECT last_insert_rowid()')[0].values[0][0]
+}
+
+export function deleteMemory(id) {
+    db.run('DELETE FROM user_memory WHERE id = ?', [id])
+    saveDB()
+}
+
+export function clearMemories() {
+    db.run('DELETE FROM user_memory')
+    saveDB()
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Projects — project spaces with custom instructions + linked knowledge
+// ═══════════════════════════════════════════════════════════════════════
+
+export function getProjects() {
+    const stmt = db.prepare('SELECT * FROM projects ORDER BY created_at DESC')
+    const rows = []
+    while (stmt.step()) rows.push(stmt.getAsObject())
+    stmt.free()
+    return rows
+}
+
+export function getProject(id) {
+    const stmt = db.prepare('SELECT * FROM projects WHERE id = ?')
+    stmt.bind([id])
+    let row = null
+    if (stmt.step()) row = stmt.getAsObject()
+    stmt.free()
+    return row
+}
+
+export function createProject(id, name, instructions = '', knowledgeIds = '[]', color = '#5b8def') {
+    db.run('INSERT INTO projects (id, name, instructions, knowledge_ids, color) VALUES (?, ?, ?, ?, ?)', [id, name, instructions, knowledgeIds, color])
+    saveDB()
+}
+
+export function updateProject(id, name, instructions, knowledgeIds, color) {
+    const sets = []
+    const vals = []
+    if (name !== undefined) { sets.push('name = ?'); vals.push(name) }
+    if (instructions !== undefined) { sets.push('instructions = ?'); vals.push(instructions) }
+    if (knowledgeIds !== undefined) { sets.push('knowledge_ids = ?'); vals.push(knowledgeIds) }
+    if (color !== undefined) { sets.push('color = ?'); vals.push(color) }
+    if (!sets.length) return
+    vals.push(id)
+    db.run(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`, vals)
+    saveDB()
+}
+
+export function deleteProject(id) {
+    db.run('DELETE FROM projects WHERE id = ?', [id])
+    // Unlink conversations from this project
+    db.run("UPDATE conversations SET project_id = NULL WHERE project_id = ?", [id])
+    saveDB()
+}
+
+export function setConversationProject(convId, projectId) {
+    db.run('UPDATE conversations SET project_id = ? WHERE id = ?', [projectId, convId])
+    saveDB()
+}
+
+export function getConversationsByProject(projectId) {
+    const stmt = db.prepare('SELECT * FROM conversations WHERE project_id = ? ORDER BY created_at DESC')
+    stmt.bind([projectId])
+    const rows = []
+    while (stmt.step()) rows.push(stmt.getAsObject())
+    stmt.free()
+    return rows
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Canvas Docs — collaborative editing documents tied to conversations
+// ═══════════════════════════════════════════════════════════════════════
+
+export function getCanvasDocs(convId) {
+    const stmt = db.prepare('SELECT * FROM canvas_docs WHERE conv_id = ? ORDER BY updated_at DESC')
+    stmt.bind([convId])
+    const rows = []
+    while (stmt.step()) rows.push(stmt.getAsObject())
+    stmt.free()
+    return rows
+}
+
+export function getCanvasDoc(id) {
+    const stmt = db.prepare('SELECT * FROM canvas_docs WHERE id = ?')
+    stmt.bind([id])
+    let row = null
+    if (stmt.step()) row = stmt.getAsObject()
+    stmt.free()
+    return row
+}
+
+export function saveCanvasDoc(id, convId, title, type, content, language = '') {
+    const existing = db.exec(`SELECT id FROM canvas_docs WHERE id = '${id.replace(/'/g, "''")}'`)
+    if (existing.length) {
+        db.run(`UPDATE canvas_docs SET title=?, type=?, content=?, language=?, updated_at=datetime('now','localtime') WHERE id=?`, [title, type, content, language, id])
+    } else {
+        db.run('INSERT INTO canvas_docs (id, conv_id, title, type, content, language) VALUES (?, ?, ?, ?, ?, ?)', [id, convId, title, type, content, language])
+    }
+    saveDB()
+}
+
+export function deleteCanvasDoc(id) {
+    db.run('DELETE FROM canvas_docs WHERE id = ?', [id])
+    saveDB()
 }

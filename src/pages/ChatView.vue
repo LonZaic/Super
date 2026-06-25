@@ -1,4 +1,4 @@
-﻿<template>
+<template>
     <div class="chat-area">
 
             <VirtualList ref="virtualListRef" :items="store.visibleMessages" :estimated-height="60" key-field="id">
@@ -13,7 +13,6 @@
                         :design-progress="item.designProgress || 0"
                         :raw-text="item._rawText || ''"
                         :streaming="item.id === store.streamingId"
-                        :agent-events="item._agentEvents || []"
                         :sibling-count="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).count : 1"
                         :sibling-index="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).index : 1"
                         :device-picker="item._devicePicker || false"
@@ -21,9 +20,13 @@
                         :live-svg="item._liveSvg || ''"
                         :side-quest="item._sideQuest || null"
                         :side-quest-loading="!!sideQuestLoadingMap['sq_' + item.id]"
+                        :image-gallery="item._imageGallery || []"
+                        :user-choice="item._userChoice || null"
+                        :file-confirm="item._fileConfirm || null"
                         @regenerate="regenerate"
                         @edit="onEditMessage(item)"
                         @delete="onDeleteMessage(item)"
+                        @fork="onForkConversation(item)"
                         @prev-branch="store.switchBranch(item.parent_id, 'prev')"
                         @next-branch="store.switchBranch(item.parent_id, 'next')"
                         @pick-device="onPickDevice(item, $event)"
@@ -37,6 +40,10 @@
                         @ask-zip="onAskZip"
                         @sideQuestAsk="onSideQuestAsk"
                         @sideQuestDelete="onSideQuestDelete"
+                        @choice-select="onUserChoiceSelect"
+                        @file-confirm-approve="onFileConfirmApprove"
+                        @file-confirm-cancel="onFileConfirmCancel"
+                        @image-send-email="onImageSendEmail"
                     />
                 </template>
             </VirtualList>
@@ -46,10 +53,10 @@
             <InputBar
                 ref="inputBarRef"
                 v-model="inputText"
-                :is-running="!!agentRunningMap[store.currentId] || store.isLoadingFor(store.currentId)"
+                :is-running="store.isLoadingFor(store.currentId)"
                 :files="pendingFiles"
                 :thinking-depth="thinkingDepth"
-                :model="agentMode ? 'deepseek-v4-pro' : store.model"
+                :model="store.model"
                 :placeholder="t('askPlaceholder')"
                 mode="chat"
                 @send="onInputSend"
@@ -196,7 +203,11 @@
             <CodePanel
                 :visible="codePanelVisible"
                 :tabs="codePanelTabs"
+                :canvas-mode="true"
+                :conv-id="store.currentId || ''"
                 @close="codePanelVisible = false"
+                @ask-ai="handleCanvasAskAI"
+                @content-update="handleCanvasUpdate"
             />
 
             <!-- File Preview Panel -->
@@ -210,14 +221,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+defineOptions({ name: 'ChatView' })
+import { ref, reactive, computed, onMounted, onActivated, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../store/chatStore.js'
 import { useDebounce } from '../composables/useDebounce.js'
 import { saveFile, loadFile } from '../utils/fileDB.js'
 import { extractFileContent, isTextFile, isImageFile } from '../utils/extractFile.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
-import { getEmailTools } from '../utils/functionCalling.js'
+import { getEmailTools, getInboxTools, getMemoryTools, getImageGenTool, getImageLibraryTool, getAskUserChoiceTool, searchImageLibrary } from '../utils/functionCalling.js'
 import { ocrForContext } from '../utils/ocr.js'
 import { getApiHeaders } from '../utils/apiHeaders.js'
 
@@ -239,6 +251,10 @@ import { useI18n } from '../composables/useI18n.js'
 import { confirmDelete } from '../utils/confirm.js'
 import { getCollections, getAllSavedItems, saveItem, findCollectionByName, createCollection, renameCollection, updateSavedItemContent, moveSavedItem, deleteSavedItem } from '../db/database.js'
 import { computerMode } from '../stores/computerModeStore.js'
+import { getMemories, getProject, getConversations } from '../db/database.js'
+
+// Memory toggle — user controls whether persistent memory is active (default OFF)
+const memoryEnabled = ref(localStorage.getItem('memory_enabled') === 'true')
 
 // ═══ DSML / Claude-style XML Tool Call Parser ═══
 // DeepSeek models sometimes output Claude-style XML tool invocations as text
@@ -252,8 +268,16 @@ function parseXmlToolCalls(text) {
     const toolCalls = []
     const usedRanges = []
 
-    // Known tool names
-    const KNOWN_TOOLS = ['save_file','svg_to_image','create_zip','create_gif','create_document','create_pdf','create_audio','convert','web_search','web_fetch','get_weather','request_design_preview']
+    // Known tool names — must include ALL tools so bare-tag XML is parsed & stripped
+    const KNOWN_TOOLS = [
+        'save_file','svg_to_image','create_zip','create_gif','create_document','create_pdf','create_audio','convert',
+        'web_search','web_fetch','get_weather','request_design_preview',
+        'save_to_collection','rename_collection','move_last_saved','update_last_saved','delete_last_saved','list_collections',
+        'send_email','schedule_email','fetch_messages','reply_email','send_channel','list_inbox_sources',
+        'save_memory','recall_memory','generate_image','search_image','ask_user_choice',
+        'search_files','read_file','deliver_file','list_directory','system_info','analyze_disk',
+        'parse_word_template','fill_word_template',
+    ]
 
     // Pattern 1: <invoke name="tool">...</invoke>
     const invokeRegex = /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/g
@@ -328,8 +352,15 @@ function stripDSML(text) {
     // 2. Remove DSML blocks
     result = result.replace(/<[|｜]{2}\s*DSML\s*[|｜]{2}[\s\S]*?<\/[|｜]{2}\s*DSML\s*[|｜]{2}>/gi, '')
     result = result.replace(/<[|｜]{2}\s*DSML\s*[|｜]{2}[\s\S]*$/gi, '')
-    // 3. Remove any remaining individual XML tool-call tags
-    const TOOL_TAGS = 'function_calls|invoke|parameter|tool_calls?|DSML|save_file|create_zip|svg_to_image|create_gif|create_document|create_pdf|create_audio|convert|web_search|web_fetch|get_weather|save_to_collection|rename_collection|move_last_saved|update_last_saved|delete_last_saved|list_collections'
+    // 3. Remove any remaining individual XML tool-call tags — must cover ALL tools
+    const TOOL_TAGS = 'function_calls|invoke|parameter|tool_calls?|DSML' +
+        '|save_file|create_zip|svg_to_image|create_gif|create_document|create_pdf|create_audio|convert' +
+        '|web_search|web_fetch|get_weather' +
+        '|save_to_collection|rename_collection|move_last_saved|update_last_saved|delete_last_saved|list_collections' +
+        '|send_email|schedule_email|fetch_messages|reply_email|send_channel|list_inbox_sources' +
+        '|save_memory|recall_memory|generate_image|search_image|ask_user_choice|request_design_preview' +
+        '|search_files|read_file|deliver_file|list_directory|system_info|analyze_disk' +
+        '|parse_word_template|fill_word_template'
     result = result.replace(new RegExp('<\\/?\\s*(' + TOOL_TAGS + ')[^>]*\\/?>', 'gi'), '')
     // 4. Self-closing tags
     result = result.replace(/<(\w+:)?\s*(tool_calls?|function_calls?|invoke|parameter)\b[^>]*\/>/gi, '')
@@ -477,21 +508,14 @@ function selectModel(id) {
 const pendingFiles = ref([])
 // Web search always ON — 不确定就搜，禁止编造
 const thinkingDepth = ref('on')  // 'on' = thinking enabled, 'off' = thinking disabled
-const agentMode = ref(false)
 const showDeviceBar = ref(false)
 const selectedDevice = ref(null)
 const pendingDesignText = ref('')
 
-function getAgentMode() { return agentMode.value }
 function getPendingDesignText() { return pendingDesignText.value }
 function setPendingDesignText(val) { pendingDesignText.value = val }
 function setShowDeviceBar(val) { showDeviceBar.value = val }
 
-// Persistent across tab switches (agent runs in background)
-const agentAbortMap = {}
-const agentRunningMap = {}
-const agentTimerMap = {}
-const agentTimerNow = ref(0)
 const tokPrompt = ref(0); const tokComp = ref(0); const tokTotal = ref(0)
 const tokContext = ref(0) // actual context tokens after compression
 const tokCompressed = ref(false) // true after context compression happened
@@ -506,7 +530,6 @@ const yammy = reactive({
   shaking: false,
   _playTimer: null,
 })
-let agentTimerInterval = null
 
 // ═══ TokenBar persistence — save/restore token counts per conversation ═══
 const TOKEN_STORAGE_KEY = 'ds_token_usage'
@@ -603,49 +626,82 @@ async function fetchBalance() {
 onMounted(async () => {
     // Auto-trigger AI reply for conversations started from homepage
     // This MUST run first — before any other init that might clear the pending flag
-    const pendingAutoReply = store._pendingAutoReply && store._pendingAutoReply === store.currentId
+    const pendingId = store._pendingAutoReply
+    const pendingAutoReply = pendingId && (pendingId === store.currentId || pendingId === route.params.id)
     if (pendingAutoReply) {
-        delete store._pendingAutoReply
+        store._pendingAutoReply = null
     }
+
+    // Always load API key — needed for streaming even if messages are already loaded
+    store.loadApiKey()
 
     // Only init if HomeView hasn't already restored state for this conversation
     const effectiveId = route.params.id || store.currentId
     const alreadyLoaded = effectiveId && store.messagesMap[effectiveId] && store.messagesMap[effectiveId].length > 0
 
     if (!alreadyLoaded) {
-        store.loadApiKey()
         await store.loadConversations()
     }
 
     if (route.params.id) {
         // switchTab is a no-op if currentId already matches
-        store.switchTab(route.params.id)
+        await store.switchTab(route.params.id)
         // Restore saved token counters for this conversation
         loadTokenState(route.params.id)
     } else if (store.currentId && !store.messagesMap[store.currentId]) {
         // ChatView rendered without route param (e.g. quickStart before router.push completes)
-        store.switchTab(store.currentId)
+        await store.switchTab(store.currentId)
         loadTokenState(store.currentId)
     }
 
     fetchBalance()
 
     if (pendingAutoReply) {
-        nextTick(() => {
-            const msgs = store.messagesMap[store.currentId] || []
-            const lastMsg = msgs[msgs.length - 1]
-            if (lastMsg && lastMsg.role === 'user') {
-                callStreamAPI()
+        // Use async IIFE to properly await switchTab before calling callStreamAPI
+        ;(async () => {
+            await nextTick()
+            const targetId = pendingId || store.currentId
+            // Ensure currentId is set to the pending conversation before streaming
+            if (store.currentId !== targetId) {
+                await store.switchTab(targetId)
             }
-        })
+            const msgs = store.messagesMap[targetId] || []
+            const lastMsg = msgs[msgs.length - 1]
+            if (lastMsg && lastMsg.role === 'user' && !store.isLoadingFor(targetId)) {
+                callStreamAPI()
+            } else if (lastMsg && lastMsg.role === 'user' && store.isLoadingFor(targetId)) {
+                // Already loading — might be a duplicate trigger, skip
+                console.warn('[AutoReply] already loading, skipping')
+            } else {
+                // No user message found — might be a race condition, retry after short delay
+                console.warn('[AutoReply] no user message found, retrying in 300ms...')
+                await new Promise(r => setTimeout(r, 300))
+                const retryMsgs = store.messagesMap[targetId] || []
+                const retryLast = retryMsgs[retryMsgs.length - 1]
+                if (retryLast && retryLast.role === 'user' && !store.isLoadingFor(targetId)) {
+                    if (store.currentId !== targetId) await store.switchTab(targetId)
+                    callStreamAPI()
+                }
+            }
+        })()
     }
     initEmailScheduler()
 })
 
-watch(() => route.params.id, (newId, oldId) => {
+// keep-alive: sync route param when returning to ChatView from other pages
+onActivated(() => {
+    const id = route.params.id
+    if (id && id !== store.currentId) {
+        store.switchTab(id)
+        loadTokenState(id)
+    }
+    fetchBalance()
+})
+
+watch(() => route.params.id, async (newId, oldId) => {
     if (newId && newId !== store.currentId) {
         saveTokenState()  // save current conversation tokens before switching
-        store.switchTab(newId)
+        await store.switchTab(newId)
         // Reset counters for the target conversation (don't save zeros)
         _skipTokenSave = true
         tokPrompt.value = 0; tokComp.value = 0; tokTotal.value = 0; tokContext.value = 0; tokCompressed.value = false
@@ -655,14 +711,14 @@ watch(() => route.params.id, (newId, oldId) => {
     }
     // Handle pending auto-reply from HomeView quickStart (flag set after addUserMessage)
     if (newId && store._pendingAutoReply === newId) {
-        delete store._pendingAutoReply
-        nextTick(() => {
-            const msgs = store.messagesMap[newId] || []
-            const lastMsg = msgs[msgs.length - 1]
-            if (lastMsg && lastMsg.role === 'user') {
-                callStreamAPI()
-            }
-        })
+        store._pendingAutoReply = null
+        await nextTick()
+        const msgs = store.messagesMap[newId] || []
+        const lastMsg = msgs[msgs.length - 1]
+        if (lastMsg && lastMsg.role === 'user' && !store.isLoadingFor(newId)) {
+            if (store.currentId !== newId) await store.switchTab(newId)
+            callStreamAPI()
+        }
     }
 })
 
@@ -857,7 +913,7 @@ async function send() {
     const text = inputText.value.trim()
     const hasFiles = pendingFiles.value.length > 0
     if (!text && !hasFiles) return
-    if (agentRunningMap[store.currentId] || store.isLoadingFor(store.currentId)) return
+    if (store.isLoadingFor(store.currentId)) return
     if (textareaRef.value) textareaRef.value.style.height = 'auto'
 
     const dsKeyMode = localStorage.getItem('key_mode') || 'builtin'
@@ -874,6 +930,28 @@ async function send() {
     if (isDesignRequest(text)) {
         showDesignPicker(text, '', files)
         return
+    }
+
+    // ═══ Method 2: user selected files + email intent → pre-convert attachments ═══
+    // When user directly selects files and says "send via email", convert the files
+    // to base64 attachments and stash them so the AI's send_email tool can use them.
+    let emailAttachmentsStash = null
+    if (detectEmailWithFilesIntent(text, files)) {
+      emailAttachmentsStash = await filesToEmailAttachments(files)
+      if (emailAttachmentsStash.length > 0) {
+        // Augment the user text so the AI knows attachments are ready
+        const fileList = emailAttachmentsStash.map(a => a.filename).join('、')
+        const augmentedText = text + `\n\n[系统提示：用户已选择 ${emailAttachmentsStash.length} 个文件作为附件：${fileList}。这些文件已转换为base64格式，调用 send_email 时在 attachments 参数中传入以下数据：${JSON.stringify(emailAttachmentsStash.map(a => ({ filename: a.filename })))}。实际附件内容已暂存，send_email 工具会自动处理。请先确认收件人邮箱地址，如果用户没提供就调用 ask_user_choice 询问。]`
+        store.addUserMessage(augmentedText, files)
+        scrollToUserMsg()
+        const conv = store.conversations.find(c => c.id === store.currentId)
+        if (!conv || !conv.title || conv.title === '新对话') {
+          generateTitle(text || (files[0]?.name || '文件'), store.currentId)
+        }
+        // Stash attachments on the streaming message so send_email executor can pick them up
+        await callStreamAPI(files, false, false, null, emailAttachmentsStash)
+        return
+      }
     }
 
     // Show user message instantly for normal chat
@@ -978,114 +1056,6 @@ watch(
   },
   { deep: false }
 )
-
-async function sendToAgent(task) {
-    const dsKeyMode = localStorage.getItem('key_mode') || 'builtin'
-    if (dsKeyMode === 'own' && !store.apikey) { alert('请先输入 API Key'); return }
-    const convId = store.currentId
-
-    // All messages go through the full callStreamAPI path with web_search support
-    // Clean up any previous agent state for this conversation
-    if (agentAbortMap[convId]) {
-        agentAbortMap[convId].abort()
-        delete agentAbortMap[convId]
-    }
-
-    // Mark this conversation as having an agent running
-    agentRunningMap[convId] = true
-    agentTimerMap[convId] = Date.now()
-    startAgentTimer()
-
-    // User message shows as a bubble (no [Agent] prefix in agent mode)
-    await store.addUserMessage(task, [])
-    scrollToUserMsg()
-    inputText.value = ''
-    if (textareaRef.value) textareaRef.value.style.height = 'auto'
-
-    const tempId = store.startStreamReply(convId)
-
-    // Create abort controller for THIS agent run
-    const abortCtrl = new AbortController()
-    agentAbortMap[convId] = abortCtrl
-
-    let logText = ''
-    let finalStreamedText = ''
-    function push(t) { logText += t; store.updateStreamCleanText(tempId, logText) }
-    const startTime = Date.now()
-    const collected = [{ _startTime: startTime }]
-    try {
-        const res = await fetch('/api/agent/run', {
-            method: 'POST',
-            headers: getApiHeaders({
-                'Authorization': 'Bearer ' + localStorage.getItem('bbot_token'),
-                'x-permission-mode': store.permissionMode || 'default',
-            }),
-            body: JSON.stringify({ task, model: 'deepseek-v4-pro' }),
-            signal: abortCtrl.signal
-        })
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || ''
-            for (const line of lines) {
-                const trimmed = line.trim()
-                if (!trimmed.startsWith('data:')) continue
-                let evt
-                try { evt = JSON.parse(trimmed.slice(5).trim()) } catch { continue }
-                collected.push(evt)
-                store.updateStreamAgentEvents(tempId, [...collected])
-                // AI's real-time narration
-                if (evt.type === 'thinking' && evt.text) {
-                    const cleanText = sanitizeReasoning(evt.text)
-                    if (!logText) push(cleanText)
-                    else push('\n\n' + cleanText)
-                } else if (evt.type === 'final_chunk' && evt.text) {
-                    // Stream the final result word by word
-                    finalStreamedText += evt.text
-                    store.updateStreamCleanText(tempId, finalStreamedText)
-                } else if (evt.type === 'error') {
-                    push('\n\n出错了: ' + evt.text)
-                }
-            }
-        }
-    } catch (e) {
-        if (e.name === 'AbortError') {
-            push('\n\n[!] 任务中断')
-            collected.push({ type: 'aborted', text: '任务已被用户中断' })
-            store.updateStreamCleanText(tempId, (logText || '') + '\n\n<span style="color:var(--red)">[!] 任务中断</span>')
-        } else {
-            push('\n\nerror: ' + e.message)
-            collected.push({ type: 'error', text: e.message })
-        }
-        store.updateStreamAgentEvents(tempId, [...collected])
-    }
-
-    store.setLoading(false, convId)
-
-    // Use streamed final output if available, otherwise fall back to logText
-    const finalEvt = collected.find(e => e.type === 'done' || e.type === 'final')
-    if (finalStreamedText && finalStreamedText.length > 5) {
-        store.updateStreamCleanText(tempId, finalStreamedText)
-    } else if (finalEvt && finalEvt.text && finalEvt.text.length > 5) {
-        store.updateStreamCleanText(tempId, finalEvt.text)
-    } else if (logText) {
-        store.updateStreamCleanText(tempId, logText)
-    }
-    await store.finishStreamReply(tempId)
-
-    // Clean up agent state for this conversation
-    delete agentRunningMap[convId]
-    delete agentAbortMap[convId]
-    delete agentTimerMap[convId]
-    if (Object.keys(agentRunningMap).length === 0) {
-        stopAgentTimer()
-    }
-}
 
 // ─── Scroll to last user message ───
 function scrollToUserMsg() {
@@ -1204,12 +1174,12 @@ async function buildMessages(tempId) {
 - **基于自身知识直接回答。** 对于不涉及日期敏感性的非时效知识（技术原理、历史事实、常识等），可以直接回答。不确定就诚实说"这个我不确定，建议你查一下最新资料"，**不要假装去搜索或编造**。
 - **紧扣用户问题，不要跑题。** 每次回答前先确认用户到底在问什么。
 - **错了就认，对事不对人。**
-- **[最高优先级] 严禁输出任何 XML/HTML 标签。** 你的输出将通过 markdown 渲染为网页，任何非 markdown 的标签都会破坏页面显示。绝对禁止输出尖括号标签如 invoke, function_calls, parameter, tool_call, DSML, web_search, save_file 等。你只能使用纯 markdown 语法：粗体用双星号、斜体用单星号、代码用反引号、代码块用三个反引号、表格用竖线、列表用减号。**像和人聊天一样直接输出自然语言，不要输出任何尖括号。**
+- **[最高优先级] 严禁输出任何 XML/HTML 标签作为工具调用。** 你的输出将通过 markdown 渲染为网页，任何非 markdown 的标签都会破坏页面显示。绝对禁止输出尖括号标签如 invoke, function_calls, parameter, tool_call, DSML, web_search, save_file, search_files, generate_image, fetch_messages, save_memory, search_image, send_email, reply_email 等。工具调用必须通过 API 的 tool_calls 字段完成，不要在正文里输出任何尖括号标签。你只能使用纯 markdown 语法：粗体用双星号、斜体用单星号、代码用反引号、代码块用三个反引号、表格用竖线、列表用减号。**像和人聊天一样直接输出自然语言，不要输出任何尖括号。** **唯一例外：** \`\`\`svg 和 \`\`\`mermaid 代码块内部可以包含 XML/标签（这是图表渲染需要的），但必须包在三个反引号代码块里，不能裸露在正文中。
 
 ## 输出格式（严格遵守）
 - **用 Markdown 表格 + SVG 图表双轨呈现数据。** 凡是涉及多天数据（天气预报）、多项目对比、趋势变化、统计数据、价格走势、排行榜 → 先表格、后画图。表格给精确数字，SVG 给直观趋势。**有数据必画图，不准只列表格。**
 - **SVG 图表风格（强制）：** 简约无emoji、专业配色（白底/深灰线/单色重点）、字号偏大清晰（title 20px+, label 14px+）、数据点标注明确、有坐标轴标签和图例。**禁止**花哨渐变/多余装饰/卡通风格。除非用户要求，一律走干净专业风。
-- **善用图表帮助理解。** 流程、关系、架构 → 用 \`\`\`mermaid 代码块；数据趋势/对比图表/统计图/地图/示意图/绘画/logo/插图 → **必须**用 \`\`\`svg 代码块输出完整 SVG（必须含 viewBox, xmlns, 宽高）。SVG 会实时渲染展示，不需要点击。**一图胜千言，能画就画。**
+- **善用图表帮助理解。** 流程、关系、架构 → 用 \`\`\`mermaid 代码块；数据趋势/对比图表/统计图/地图/示意图 → **必须**用 \`\`\`svg 代码块输出完整 SVG（必须含 viewBox, xmlns, 宽高）。SVG 会实时渲染展示，不需要点击。**一图胜千言，能画就画。** 但注意：**绘画、插画、logo、写实图片、艺术图不要用 SVG 画**——这些用 \`generate_image\` 工具生成。SVG 只用于数据图表和示意图。
 - **该换行就换行。** 大段文字按逻辑分段，别糊成一团。
 - **面向小白。** 解释复杂概念时用大白话 + 风趣幽默的比喻。像给朋友讲技术一样——专业但接地气。
 - **非必要不表格。** 简单问答、一句话能说完的，正常文字输出就行。
@@ -1233,6 +1203,38 @@ async function buildMessages(tempId) {
     // Collection system — preferred for saving text content
     sysContent += '\n\n## 收藏系统\n你有 save_to_collection 工具可以将文字内容存入用户的收藏夹。**当用户要求"收藏"、"存起来"、"保存这段对话"、"存到XX收藏夹"时，必须调用此工具，严禁口头说"已存好"但不调工具。** 此外还有 rename_collection、move_last_saved、update_last_saved、delete_last_saved、list_collections 等工具管理收藏。**对于文本内容的保存，优先用收藏系统而非生成下载文件。**'
 
+    // Project space — inject project-specific instructions if conversation belongs to a project
+    try {
+      const convId = store.currentId
+      if (convId) {
+        const convs = getConversations()
+        const conv = convs.find(c => c.id === convId)
+        if (conv && conv.project_id) {
+          const project = getProject(conv.project_id)
+          if (project && project.instructions) {
+            sysContent += `\n\n## 项目专属指令：${project.name}\n当前对话属于项目「${project.name}」，请严格遵循以下项目指令：\n${project.instructions}`
+          }
+        }
+      }
+    } catch (e) { console.warn('[Project] inject instructions failed:', e) }
+
+    // Information agent — read & reply across email/feishu/dingtalk/wecom/github/rss
+    sysContent += '\n\n## 信息代理（Information Agent）\n你是用户的信息代理，可以接入用户的邮箱、飞书、钉钉、企业微信、GitHub、RSS 等信息源，帮用户读取、总结、处理和回复消息。\n\n### 你的能力\n- `fetch_messages`：读取用户各信息源的最新消息。用户说"今天收到什么消息""帮我看看邮箱""最近有什么通知""飞书有什么新消息"时调用。可指定 sourceId 读单个源，也可不传读所有已配置的源。\n- `list_inbox_sources`：列出用户已配置的所有信息源。当你不确定有哪些信息源可用时先调用此工具。\n- `reply_email`：回复邮件。需要 sourceId（邮箱信息源ID）、收件人、主题、正文。可带 inReplyTo 关联原邮件线程。支持 to 传数组群发。\n- `send_channel`：向飞书/钉钉/企业微信群发送消息。需要 sourceId 和 text。\n- `send_email`：发送新邮件。支持 to 传数组一次群发给多人，支持 cc 抄送、附件。\n\n### 使用原则\n1. **用户问"今天有什么消息"类问题** → 先调 `fetch_messages`（不传 sourceId 读全部），拿到结果后用自然语言总结，按来源/重要程度归类，未读优先，不要逐条罗列原始数据。\n2. **用户要回复/发送** → 先确认用哪个信息源（如不确定先 `list_inbox_sources`），再调对应工具。\n3. **多收件人** → 用户说"发给A和B"或"群发"时，to 传数组 `["a@x.com", "b@y.com"]`。\n4. **信息源未配置** → 如果 fetch_messages 返回空或报错，友好提示用户去设置面板配置对应信息源，不要假装读到了消息。\n5. **隐私** → 读取的消息内容仅用于帮用户处理，不要泄露给第三方。'
+
+    // Persistent memory — inject user's saved memories + image gen + memory tools
+    if (memoryEnabled.value) {
+      const memories = getMemories()
+      if (memories.length) {
+        const memText = memories.map(m => `- [${m.category}] ${m.content}`).join('\n')
+        sysContent += `\n\n## 长期记忆（已开启）\n以下是跨对话持久保存的关于用户的记忆，请自然地运用这些信息来提供更个性化的回答（不要生硬地复述"根据你的记忆"）：\n${memText}\n\n当用户透露新的值得长期记住的信息（姓名、职业、偏好、项目背景、重要决定等），主动调用 \`save_memory\` 保存。用户说"记住""以后都"时必须保存。`
+      } else {
+        sysContent += '\n\n## 长期记忆（已开启）\n长期记忆功能已开启但目前为空。当用户透露值得长期记住的信息（姓名、职业、偏好、项目背景、重要决定等），主动调用 `save_memory` 保存。用户说"记住""以后都""我的XX是"时必须保存。'
+      }
+    }
+
+    // AI Image Generation
+    sysContent += '\n\n## AI 文生图（generate_image 工具）\n你有 `generate_image` 工具，用 FLUX 模型生成真实图片。**用户说"画一张""生成图片""帮我画""AI画图""画个XXX"时必须调用此工具**，不要说"我发不了图片"或"我只能用SVG画"——你完全可以生成图片！描述越详细效果越好，可指定风格（写实/动漫/油画/水彩/3D/logo/插画等）和尺寸。生成后会直接在聊天中显示图片。\n**注意区分两种"画"：**\n- 用户要"画一张猫""画个logo""生成一张图片" → 调用 `generate_image` 工具（AI 生图）\n- 数据图表、流程图、统计图、示意图 → 用 ```svg 代码块（见下方输出格式）\n- 用户要"画个流程图""画个架构图" → 用 ```mermaid 代码块'
+
     // Computer management mode
     if (computerMode.value) {
       sysContent += `
@@ -1253,6 +1255,7 @@ async function buildMessages(tempId) {
 - **找到多个匹配时，列出匹配给用户选择。** 不要说"未找到"然后放弃 — 列出所有匹配，说明文件位置和大小，让用户确认要哪一个。
 - **用户要文件就直接给。** 用户说"给我那个文件""发给我""把那个图片给我" → 用 \`deliver_file\` 投递。PDF、Word、图片、压缩包等二进制文件会自动转为下载链接。
 - **不要输出原始文件内容的纯文本列表。** 解读文件内容、总结要点、用自然语言告诉用户。
+- **【最高优先级】持续工作直到任务完成。** 用户问"E盘有多少个文件夹" → 先调 \`list_directory\` 看 E 盘，数完文件夹数量后直接回答，不要中途停下等用户催。用户问"XXX文件是什么" → 先 \`search_files\` 找到文件，再 \`read_file\` 读取内容，然后总结回答，一气呵成。**绝对禁止调了一个工具就停下来说"已列出目录"或"已找到文件"然后等用户追问——你必须自己判断下一步该做什么并继续执行，直到给出最终答案。** 每一轮工具调用后都要问自己："用户的问题现在能完整回答了吗？"如果不能，继续调工具；如果能，立即用自然语言回答。
 - **禁止访问系统内核路径**（System32、\\sys\\、\\proc\\ 等），其余所有路径全部允许读取。
 
 ### 安全限制
@@ -1296,6 +1299,34 @@ async function buildMessages(tempId) {
             sysContent += downloadInfoBlock
         }
     } catch {} // safety: never let download info injection break context building
+
+    // ═══ Image library + interactive choice tools ═══
+    sysContent += '\n\n## 图片库（图文并发）\n你有 search_image(query, limit) 工具，可以根据关键词搜索/生成真实图片并在聊天中直接展示。**此工具必定返回图片，永远不会"搜不到"——它用 AI 生成图片，任何关键词都有结果。**\n\n### 强制规则（违反=严重bug）：\n1. **用户要图片时必须调用 search_image 工具**，而不是只用文字说"让我搜索""正在搜索"。只说不调用=bug。\n2. 调用后图片会自动渲染在聊天中，你只需用文字简要描述图片内容。\n3. 触发场景：用户说"给我看张图""配个图""有没有XXX的图片""搜图片""发张图""我想看XXX""找张XXX的图"等任何暗示要图片的话。\n4. 介绍事物/风景/生物/地理/历史/产品时，如果配图能提升体验，主动调用。\n5. limit 默认3，最多6。\n\n### 正确示例：\n用户："给我看张猫的图"\n✅ 正确：直接调用 search_image(query="猫")，然后说"这是为你找到的猫咪图片🐱"\n❌ 错误：回复"让我搜索一下..."然后什么都不做'
+
+    sysContent += '\n\n## 互动选择卡片（Claude风格）\n你有 ask_user_choice(prompt, choices, multi) 工具。**当用户的请求有多种理解、多种方案、或需要用户做选择时**，调用此工具展示选项卡片让用户选择。典型场景：\n- 用户说"发邮件"但没说发给谁 → 展示候选收件人\n- 用户说"找那个文件"找到多个 → 展示让用户选\n- 有多种实现方案 → 展示方案让用户选\n- 用户意图模糊 → 展示可能的解读让用户选\n调用后停止生成，等待用户选择。用户选择后会自动作为新消息发送给你。每次最多4个选项。**这是提升用户体验的利器，该用就用，不要总是自己猜。**'
+
+    sysContent += '\n\n## 邮件带附件\nsend_email 工具支持 attachments 参数。附件可以是：\n- { filename, path } — 本地文件路径（从 search_files 结果获取）\n- { filename, url } — 远程图片URL（从 search_image 结果获取）\n当用户说"把文件发到邮箱""把这个图片邮件给我"时，先确认文件路径或图片URL，然后调用 send_email 带上 attachments 参数。'
+
+    // ═══ RAG: Knowledge base retrieval augmentation ═══
+    // Search user's knowledge base for relevant context and inject into system prompt
+    try {
+      const { useKnowledgeStore } = await import('../stores/knowledgeStore.js')
+      const kbStore = useKnowledgeStore()
+      if (kbStore.ragEnabled && kbStore.documentCount > 0) {
+        // Get latest user message text for query
+        const lastUserMsg = prevMsgs.filter(m => m.role === 'user').pop()
+        const queryText = lastUserMsg ? (lastUserMsg._apiText || lastUserMsg.text || '') : ''
+        if (queryText && queryText.length > 2) {
+          const results = await kbStore.search(queryText, 4)
+          const ragContext = kbStore.buildContext(results)
+          if (ragContext) {
+            sysContent += ragContext
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[RAG] knowledge retrieval failed:', e.message)
+    }
 
     // ─── Context window management (DeepSeek-style AI compression) ───
     let totalTokens = estimateTokens(sysContent)
@@ -1500,6 +1531,41 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
                     streamDisplay = streamDisplay.replace(/<\/?\s*(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)\b[\s\S]*?(<\/(?:xz:?\s*)?(?:tool_calls?|function_calls?|invoke)>|$)/gi, '')
                     streamDisplay = stripDSML(streamDisplay)
                     store.appendStreamText(tempId, streamDisplay)
+                    // ═══ Live SVG extraction — feed incremental SVG to the "正在绘制..." box ═══
+                    // Detect an in-progress ```svg code block and render it live so the user
+                    // sees the drawing appear stroke-by-stroke instead of waiting for the end.
+                    const svgMatch = streamDisplay.match(/```(?:svg|svg-chart|xml)?\s*\n(\s*<svg\b[\s\S]*?)(?:```|$)/i)
+                    if (svgMatch && svgMatch[1]) {
+                        let liveSvg = svgMatch[1].trim()
+                        // Close unclosed <svg> during streaming so it can render
+                        if (/<svg\b/i.test(liveSvg) && !/<\/svg>\s*$/i.test(liveSvg)) {
+                            // Auto-close unclosed tags from the inside out
+                            const openTags = []
+                            const tagRegex = /<\/?(\w[\w-]*)\b[^>]*?(\/?)>/gi
+                            let m
+                            while ((m = tagRegex.exec(liveSvg)) !== null) {
+                                const isClose = m[0].startsWith('</')
+                                const tag = m[1].toLowerCase()
+                                const selfClose = m[2] === '/' || /^(path|circle|rect|line|ellipse|polygon|polyline|use|image|stop|br|hr|img|input|meta|link)$/i.test(tag)
+                                if (isClose) {
+                                    const idx = openTags.lastIndexOf(tag)
+                                    if (idx !== -1) openTags.splice(idx, 1)
+                                } else if (!selfClose) {
+                                    openTags.push(tag)
+                                }
+                            }
+                            // Close in reverse order
+                            for (let i = openTags.length - 1; i >= 0; i--) {
+                                liveSvg += `</${openTags[i]}>`
+                            }
+                        }
+                        if (/<svg\b/i.test(liveSvg)) {
+                            store.updateStreamLiveSvg(tempId, liveSvg)
+                        }
+                    } else if (!streamDisplay.includes('```')) {
+                        // No SVG block at all — clear live SVG box
+                        store.updateStreamLiveSvg(tempId, '')
+                    }
                 }
                 if (delta?.tool_calls) {
                     for (const tc of delta.tool_calls) {
@@ -1524,13 +1590,34 @@ async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, de
     const toolCalls = [...toolCallsFromServer, ...legacyToolCalls]
 
     // ═══ Legacy XML parser (DeepSeek quirk fallback) ═══
-    const hasInvokeXml = fullText && fullText.includes('<invoke')
+    // Detect both <invoke name="..."> and bare <tool_name> XML formats
+    const hasInvokeXml = fullText && (
+        fullText.includes('<invoke') ||
+        /<(?:save_file|svg_to_image|create_zip|create_gif|create_document|create_pdf|create_audio|convert|web_search|web_fetch|get_weather|save_to_collection|rename_collection|move_last_saved|update_last_saved|delete_last_saved|list_collections|send_email|schedule_email|fetch_messages|reply_email|send_channel|list_inbox_sources|save_memory|recall_memory|generate_image|search_image|ask_user_choice|request_design_preview|search_files|read_file|deliver_file|list_directory|system_info|analyze_disk|parse_word_template|fill_word_template)\b[^>]*>/i.test(fullText)
+    )
     const xmlResult = hasInvokeXml ? parseXmlToolCalls(fullText) : { cleanText: fullText, toolCalls: [] }
     if (xmlResult.toolCalls.length > 0) {
         for (const tc of xmlResult.toolCalls) {
             toolCalls.push(tc)
         }
     }
+
+    // ═══ Deduplicate tool calls (same function + same arguments = double-execution bug) ═══
+    // Tool calls can come from 3 sources: server structured events, legacy API delta,
+    // and XML text parsing. A single AI action (e.g., send_email) may appear in all 3,
+    // causing the email to be sent multiple times. Dedup by function name + args hash.
+    const seenCalls = new Set()
+    const deduped = []
+    for (const tc of toolCalls) {
+        const name = tc.function?.name || ''
+        const args = tc.function?.arguments || ''
+        const key = name + '|' + args
+        if (seenCalls.has(key)) continue
+        seenCalls.add(key)
+        deduped.push(tc)
+    }
+    toolCalls.length = 0
+    toolCalls.push(...deduped)
 
     let resultText = xmlResult.cleanText || fullText || ''
     if (!resultText && toolCalls.length > 0) {
@@ -1620,10 +1707,10 @@ async function doStreamForSideQuest(msgs, onChunk) {
     return { text: resultText, reasoning: fullReasoning }
 }
 
-async function callStreamAPI(files = [], skipEmail = false, isDesign = false, device = null) {
+async function callStreamAPI(files = [], skipEmail = false, isDesign = false, device = null, emailAttachmentsStash = null) {
     const convId = store.currentId
     store.setLoading(true, convId)
-    const tempId = store.startStreamReply()
+    const tempId = store.startStreamReply(convId)
     const abortCtrl = new AbortController()
     store.setAbortController(abortCtrl, convId)
 
@@ -1683,6 +1770,39 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false, de
         }
 
         const { tools, executors } = skipEmail ? { tools: [], executors: {} } : getEmailTools()
+
+        // ═══ Information Agent tools: fetch_messages / reply_email / send_channel / list_inbox_sources ═══
+        // Always available so AI can act as the user's information agent (read & reply across channels)
+        const inboxBundle = getInboxTools()
+        tools.push(...inboxBundle.tools)
+        Object.assign(executors, inboxBundle.executors)
+
+        // ═══ Memory tools: save_memory / recall_memory (only if user enabled memory) ═══
+        if (memoryEnabled.value) {
+            const memBundle = getMemoryTools()
+            tools.push(...memBundle.tools)
+            Object.assign(executors, memBundle.executors)
+        }
+
+        // ═══ AI Image Generation: generate_image (Pollinations, free) ═══
+        const imgGenBundle = getImageGenTool()
+        tools.push(...imgGenBundle.tools)
+        Object.assign(executors, imgGenBundle.executors)
+
+        // ═══ Method 2: inject stashed email attachments into send_email executor ═══
+        // When user selected files + email intent, the attachments were pre-converted to base64.
+        // Wrap the send_email executor so it automatically attaches these stashed files
+        // if the AI calls send_email without explicitly specifying attachments.
+        if (emailAttachmentsStash && emailAttachmentsStash.length > 0 && executors.send_email) {
+          const origSendEmail = executors.send_email
+          executors.send_email = async (args) => {
+            // If AI didn't specify attachments, use the stashed ones
+            if (!args.attachments || args.attachments.length === 0) {
+              args.attachments = emailAttachmentsStash
+            }
+            return origSendEmail(args)
+          }
+        }
         // Web search — 不确定就搜
         const webSearchTool = [{
             type: 'function',
@@ -2098,7 +2218,7 @@ For .pptx, use:
           }],
         ] : []
 
-        const allTools = isDesign ? [] : [...tools, ...weatherTool, ...webSearchTool, ...webFetchTool, ...saveFileTool, ...svgToImageTool, ...createZipTool, ...convertTool, ...createDocTool, ...createAudioTool, ...fillTemplateTool, ...parseTemplateTool, ...createGifTool, ...createPdfTool, ...saveToCollectionTool, ...renameCollectionTool, ...moveLastSavedTool, ...updateLastSavedTool, ...deleteLastSavedTool, ...listCollectionsTool, ...computerTools]
+        const allTools = isDesign ? [] : [...tools, ...weatherTool, ...webSearchTool, ...webFetchTool, ...saveFileTool, ...svgToImageTool, ...createZipTool, ...convertTool, ...createDocTool, ...createAudioTool, ...fillTemplateTool, ...parseTemplateTool, ...createGifTool, ...createPdfTool, ...saveToCollectionTool, ...renameCollectionTool, ...moveLastSavedTool, ...updateLastSavedTool, ...deleteLastSavedTool, ...listCollectionsTool, ...computerTools, getImageLibraryTool(), getAskUserChoiceTool()]
 
         const dw = device?.w || 375
         const dh = device?.h || 667
@@ -2146,6 +2266,7 @@ For .pptx, use:
         let lastToolName = ''
         let anyFileTool = false
         let anySearchTool = false
+        let anyImageTool = false  // generate_image / search_image — needs follow-up so AI can describe the image
 
         if (activeToolCalls.length > 0) {
             // ─── Add assistant message with ALL tool calls ───
@@ -2159,6 +2280,12 @@ For .pptx, use:
                 const toolName = tc.function?.name
                 let args = {}
                 try { args = JSON.parse(tc.function?.arguments || '{}') } catch {}
+
+                // ─── Show progress indicator for EVERY tool (like "🔍 搜索中") ───
+                // Skip web_search — its progress is already shown via server-side 'searching' event
+                if (toolName !== 'web_search') {
+                  showToolProgress(store, toolName, args, tempId)
+                }
 
                 const isFileTool = toolName === 'save_file' ||
                                    toolName === 'svg_to_image' ||
@@ -2214,6 +2341,14 @@ For .pptx, use:
                     toolResult = await handleAnalyzeDisk(args)
                 } else if (toolName === 'search_files') {
                     toolResult = await handleSearchFiles(args)
+                } else if (toolName === 'search_image') {
+                    toolResult = await handleSearchImage(args, tempId)
+                    anyImageTool = true
+                } else if (toolName === 'generate_image') {
+                    toolResult = await handleGenerateImage(args, tempId)
+                    anyImageTool = true
+                } else if (toolName === 'ask_user_choice') {
+                    toolResult = await handleAskUserChoice(args, tempId)
                 } else if (executors[toolName]) {
                     toolResult = await executors[toolName](args)
                 } else {
@@ -2251,7 +2386,6 @@ For .pptx, use:
                 finalText = second.text || first.text
                 if (!finalText || finalText.length < 5 || finalText.startsWith('[工具调用:')) {
                     // Generate proper summary from tool results (handles deepseek-v4-pro empty content)
-                    const convId = store.currentId
                     const msgs2 = store.messagesMap[convId] || []
                     const msg = msgs2.find(m => m.id === tempId)
                     const files = msg?._downloadFiles || []
@@ -2282,10 +2416,16 @@ For .pptx, use:
                         finalText = '文件已生成，点击下方按钮即可下载。'
                     }
                 }
+            } else if (anyImageTool) {
+                // Image generation/search: image already injected into _imageGallery.
+                // Ask AI for a brief follow-up so it can describe/confirm the image to the user.
+                msgs.push({ role: 'user', content: '图片已生成并在聊天中展示。请用一两句话简要告诉用户图片已生成、描述了什么内容，并询问是否需要调整。不要输出任何 URL 或技术细节。' })
+                const second = await doStream(msgs, tempId, [], isDesign, dw, dh, abortCtrl, 'off')
+                finalText = second.text || first.text || '图片已生成，请在上方查看。'
             } else {
-                // Search/data tools: full digest
+                // Search/data/computer tools: full digest with multi-round tool calling
                 // ─── Smart transition: preserve substantial first answer, replace only short "thinking" text ───
-                const firstText = store.messagesMap[store.currentId]?.find(m => m.id === tempId)?.text || ''
+                const firstText = store.messagesMap[convId]?.find(m => m.id === tempId)?.text || ''
                 const combinedReasoning = [first.reasoning, firstText].filter(Boolean).join('\n\n')
                 // If first answer is already substantial (>300 chars, AI gave real content including charts),
                 // keep it visible and just note verification happened. Don't wipe real answers.
@@ -2297,10 +2437,86 @@ For .pptx, use:
                     store.updateStreamCleanText(tempId, '正在整理搜索结果...')
                     store.appendStreamReasoning(tempId, combinedReasoning)
                 }
-                msgs.push({ role: 'user', content: '以上是搜索工具返回的原始数据。你必须：1）用自己的话重新组织和表达——就像这些知识本来就在你脑子里一样；2）只回答用户原本的问题，不要跑题，搜到不相关的内容就说"未找到相关信息"；3）绝对不要复制粘贴搜索条目列表、不要输出"搜索结果如下"、不要输出"[来源:]"或"[高可信]"等标注。当用户要求评价、分析、判断时，基于内容给出技术评价。该做表格做表格，该画图画画。' })
-                const second = await doStream(msgs, tempId, [], isDesign, dw, dh, abortCtrl, 'off')  // disable thinking to avoid empty-content quirk
+
+                // ─── Detect computer tools — enable multi-round tool calling ───
+                const computerToolNames = ['list_directory', 'read_file', 'deliver_file', 'search_files', 'system_info', 'analyze_disk']
+                const hasComputerTool = activeToolCalls.some(tc => computerToolNames.includes(tc.function?.name))
+
+                // ─── Build follow-up tool set: web_search + computer tools (if active) ───
+                const searchToolForFollowUp = [{
+                    type: 'function',
+                    function: { name: 'web_search', description: 'Search the web. Use to re-search with better keywords if previous results were poor.',
+                        parameters: { type: 'object', properties: { query: { type: 'string', description: 'Search query' } }, required: ['query'] }
+                    }
+                }]
+                const followUpTools = hasComputerTool ? [...searchToolForFollowUp, ...computerTools] : searchToolForFollowUp
+
+                // ─── Smart search: give AI the tool back so it can re-search with better keywords ───
+                // Instead of hardcoding query relaxation in search.js, let the AI decide
+                // when to rephrase. The AI understands synonyms (电台=广播=FM) that code can't.
+                const searchResultText = lastToolResult || ''
+                const needsRephrase = !hasComputerTool && (searchResultText.includes('未找到相关信息') || searchResultText.includes('未返回有效结果') || searchResultText.length < 100)
+                const rephraseHint = needsRephrase
+                  ? '\n\n[!] 以上搜索结果不理想。如果搜索结果与用户问题不相关，请基于你的知识想出2-3个更好的搜索关键词（考虑同义词、简称、英文等），然后再次调用 web_search。搜到满意结果后再回答。'
+                  : ''
+                msgs.push({ role: 'user', content: '以上是搜索工具返回的原始数据。你必须：1）用自己的话重新组织和表达——就像这些知识本来就在你脑子里一样；2）只回答用户原本的问题，不要跑题，搜到不相关的内容就说"未找到相关信息"；3）绝对不要复制粘贴搜索条目列表、不要输出"搜索结果如下"、不要输出"[来源:]"或"[高可信]"等标注。当用户要求评价、分析、判断时，基于内容给出技术评价。该做表格做表格，该画图画画。' + rephraseHint })
+                // Follow-up with tools available (web_search + computer tools if active)
+                const second = await doStream(msgs, tempId, followUpTools, isDesign, dw, dh, abortCtrl, 'off')
+                // ─── Multi-round tool calling loop (web_search + computer tools) ───
+                // AI can chain tool calls: list_directory → read_file → answer, etc.
+                // Max 5 additional rounds to prevent infinite loops.
+                let reSearchResult = second
+                for (let reRound = 0; reRound < 5; reRound++) {
+                  const reToolCalls = reSearchResult.toolCalls || []
+                  if (reToolCalls.length === 0) break
+                  // Execute ALL tool calls from this round (web_search + computer tools)
+                  msgs.push({ role: 'assistant', content: null, tool_calls: reToolCalls })
+                  for (const tc of reToolCalls) {
+                    let args = {}
+                    try { args = JSON.parse(tc.function?.arguments || '{}') } catch {}
+                    const tName = tc.function?.name
+                    let tResult = null
+                    if (tName === 'web_search') {
+                        showToolProgress(store, 'web_search', args, tempId)
+                        tResult = await handleWebSearch(args.query)
+                    } else if (tName === 'list_directory') {
+                        showToolProgress(store, 'list_directory', args, tempId)
+                        tResult = await handleListDirectory(args)
+                    } else if (tName === 'read_file') {
+                        showToolProgress(store, 'read_file', args, tempId)
+                        tResult = await handleReadFile(args)
+                    } else if (tName === 'deliver_file') {
+                        showToolProgress(store, 'deliver_file', args, tempId)
+                        tResult = await handleDeliverFile(args)
+                    } else if (tName === 'search_files') {
+                        showToolProgress(store, 'search_files', args, tempId)
+                        tResult = await handleSearchFiles(args)
+                    } else if (tName === 'system_info') {
+                        showToolProgress(store, 'system_info', args, tempId)
+                        tResult = await handleSystemInfo()
+                    } else if (tName === 'analyze_disk') {
+                        showToolProgress(store, 'analyze_disk', args, tempId)
+                        tResult = await handleAnalyzeDisk(args)
+                    } else {
+                        tResult = JSON.stringify({ status: 'error', error: 'Unknown tool: ' + tName })
+                    }
+                    if (tResult == null) tResult = JSON.stringify({ status: 'error', error: 'Tool returned null' })
+                    lastToolResult = tResult
+                    lastToolName = tName
+                    msgs.push({ role: 'tool', tool_call_id: tc.id, name: tName, content: tResult })
+                  }
+                  // Ask AI to continue — it can call more tools or give final answer
+                  msgs.push({ role: 'user', content: '以上是工具执行结果。你可以继续调用工具（如需要读取更多文件、搜索更多内容），或者基于已有信息用自然语言回答用户问题。不要输出工具原始数据，要用自己的话总结。' })
+                  reSearchResult = await doStream(msgs, tempId, followUpTools, isDesign, dw, dh, abortCtrl, 'off')
+                  if (reSearchResult.text && reSearchResult.text.length > 20) {
+                    finalText = reSearchResult.text
+                    // Don't break — allow AI to continue calling tools if needed
+                  }
+                }
                 // If we kept the first answer visible, append second answer; otherwise replace
-                finalText = hasSubstantialAnswer ? (second.text || firstText) : (second.text || first.text)
+                if (!finalText || finalText.length < 20) {
+                  finalText = hasSubstantialAnswer ? (second.text || firstText) : (second.text || firstText)
+                }
                 // Fallback to reasoning if content still empty
                 if ((!finalText || finalText.length < 20) && second.reasoning && second.reasoning.length > 10) {
                     finalText = second.reasoning.slice(0, 8000)
@@ -2350,7 +2566,7 @@ For .pptx, use:
                     : await handleWebSearch(autoQuery)
                 if (lastToolResult && !lastToolResult.startsWith('Search failed') && !lastToolResult.startsWith('抓取失败') && !lastToolResult.startsWith('无效的')) {
                     // ─── Preserve first stream's text as reasoning (prevents "撤回" visual glitch) ───
-                    const firstStreamText = store.messagesMap[store.currentId]?.find(m => m.id === tempId)?.text || ''
+                    const firstStreamText = store.messagesMap[convId]?.find(m => m.id === tempId)?.text || ''
                     const combinedFakeReasoning = [first.reasoning, firstStreamText].filter(Boolean).join('\n\n')
                     store.updateStreamCleanText(tempId, isUrlFetch ? '正在抓取网页内容...' : '正在搜索真实信息...')
                     store.appendStreamReasoning(tempId, combinedFakeReasoning)
@@ -2387,7 +2603,6 @@ For .pptx, use:
         // Only mark as _isSystemFallback when the user would see a "can't respond" message
         // (file summaries and tool errors are harmless, they won't poison the conversation).
         if (!finalText || finalText.length < 5 || finalText.startsWith('[工具调用:')) {
-            const convId = store.currentId
             const msgs2 = store.messagesMap[convId] || []
             const msg = msgs2.find(m => m.id === tempId)
             const dlFiles = msg?._downloadFiles || []
@@ -2413,6 +2628,8 @@ For .pptx, use:
                     finalText = `文件已生成（部分功能受限），点击下方按钮即可下载。`
                 } else if (anySearchTool) {
                     finalText = '搜索完成，结果已整理。'
+                } else if (anyImageTool) {
+                    finalText = '图片已生成，请在上方查看。'
                 } else if (anyFileTool) {
                     finalText = '操作完成，文件已在下载栏可用。'
                 } else if (first?.toolCalls?.some(tc => {
@@ -2498,7 +2715,7 @@ For .pptx, use:
         // Clear live SVG after streaming completes (final SVG rendered by markdown)
         if (realId) {
             yammy.msgId = realId
-            const msgs = store.messagesMap[store.currentId] || []
+            const msgs = store.messagesMap[convId] || []
             const msg = msgs.find(m => m.id === realId)
             if (msg) msg._liveSvg = ''
         }
@@ -2622,6 +2839,100 @@ function onSideQuestDelete(msgId) {
     store.setSideQuest(msgId, null)
 }
 
+// ═══ User choice selection (Claude-style inline interaction) ═══
+// When user clicks a choice card in the AI message, send the selected value as a new user message
+function onUserChoiceSelect({ msgId, value, label }) {
+  // Mark the choice as answered so the card shows the selection
+  const convId = store.currentId
+  const msgs = store.messagesMap[convId] || []
+  const msg = msgs.find(m => m.id === msgId)
+  if (msg && msg._userChoice) {
+    msg._userChoice.answered = true
+    msg._userChoice.selected = label
+  }
+  // Send the selected value as a new user message to continue the conversation
+  inputText.value = label || value
+  nextTick(() => send())
+}
+
+// ═══ File confirmation (管理电脑 mode) ═══
+// User confirmed which files they want — proceed with the action (deliver/email/read)
+async function onFileConfirmApprove({ msgId, selectedFiles }) {
+  const convId = store.currentId
+  const msgs = store.messagesMap[convId] || []
+  const msg = msgs.find(m => m.id === msgId)
+  if (msg && msg._fileConfirm) {
+    msg._fileConfirm.confirmed = true
+    msg._fileConfirm.selected = selectedFiles
+  }
+  if (!selectedFiles || selectedFiles.length === 0) return
+
+  // Deliver each selected file to the user (generate download links)
+  for (const f of selectedFiles) {
+    try {
+      const data = await callComputerAPI('deliver-file', { filePath: f.path })
+      if (!data.error) {
+        const fullUrl = BASE_URL + data.downloadUrl
+        if (msg) {
+          if (!msg._downloadFiles) msg._downloadFiles = []
+          if (!msg._downloadFiles.some(x => x.url === fullUrl)) {
+            msg._downloadFiles.push({ name: data.name, url: fullUrl, size: data.size })
+          }
+        }
+      }
+    } catch (e) { console.warn('[fileConfirm] deliver fail:', e.message) }
+  }
+  // Trigger AI follow-up to summarize
+  const names = selectedFiles.map(f => f.name).join('、')
+  inputText.value = `对，就是这几个文件：${names}`
+  nextTick(() => send())
+}
+
+function onFileConfirmCancel({ msgId }) {
+  const convId = store.currentId
+  const msgs = store.messagesMap[convId] || []
+  const msg = msgs.find(m => m.id === msgId)
+  if (msg && msg._fileConfirm) {
+    msg._fileConfirm.confirmed = false
+    msg._fileConfirm.cancelled = true
+  }
+  inputText.value = '不是这些，我再描述一下'
+  nextTick(() => send())
+}
+
+// ═══ Image gallery → send via email ═══
+// User clicks "send via email" on an image in the gallery
+function onImageSendEmail({ msgId, image }) {
+  // Pre-fill the input with a prompt for the AI to send the image via email
+  inputText.value = `把这张图片通过邮件发出去：${image.title || image.url}（图片URL: ${image.url}）`
+  nextTick(() => send())
+}
+
+// ═══ Convert user-uploaded files to email attachments (method 2) ═══
+// When user selects files directly and asks AI to send via email, convert the
+// uploaded file blobs to base64 attachments the email API can handle.
+async function filesToEmailAttachments(files) {
+  const attachments = []
+  for (const f of files) {
+    if (!f.key) continue
+    try {
+      const blob = await loadFile(f.key)
+      if (!blob) continue
+      const buf = await blob.arrayBuffer()
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+      attachments.push({ filename: f.name, content: base64 })
+    } catch (e) { console.warn('[email] file convert fail:', f.name, e.message) }
+  }
+  return attachments
+}
+
+// Detect if user's message + files indicate an email-send intent (method 2)
+function detectEmailWithFilesIntent(text, files) {
+  if (!files || files.length === 0) return false
+  const emailPatterns = [/发邮件|发送邮件|发到邮箱|邮件发|发过去|email|mail/i, /附件|附带|随邮件/]
+  return emailPatterns.some(p => p.test(text))
+}
+
 function onYammyClick() {
     if (!yammy.msgId) return
     yammy.clickCount++
@@ -2638,32 +2949,8 @@ function onYammyClick() {
 
 function stopGeneration() {
     const convId = store.currentId
-    // Abort agent if running
-    if (agentAbortMap[convId]) {
-        agentAbortMap[convId].abort()
-        delete agentAbortMap[convId]
-    }
     // Abort normal stream for THIS conversation
     store.abort(convId)
-}
-
-// ─── Agent timer ───
-function startAgentTimer() {
-    if (agentTimerInterval) return
-    agentTimerInterval = setInterval(() => {
-        agentTimerNow.value = Date.now()
-    }, 1000)
-}
-function stopAgentTimer() {
-    if (agentTimerInterval) {
-        clearInterval(agentTimerInterval)
-        agentTimerInterval = null
-    }
-}
-function getAgentDuration(convId) {
-    const start = agentTimerMap[convId]
-    if (!start) return 0
-    return Date.now() - start
 }
 
 // User clicked a device card in the chat → continue AI with device context
@@ -2799,7 +3086,7 @@ function openFilePreview(file) {
 }
 
 async function regenerate() {
-    if (agentRunningMap[store.currentId] || store.isLoadingFor(store.currentId)) return
+    if (store.isLoadingFor(store.currentId)) return
     const msgs = store.visibleMessages
     let device = null
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -2836,8 +3123,74 @@ async function onDeleteMessage(item) {
     store.removeMessage(item.id)
 }
 
+// ─── Fork conversation: create a new conversation from this message ───
+async function onForkConversation(item) {
+    try {
+        const newConvId = await store.forkConversation(item.id)
+        if (newConvId) {
+            router.push('/chat/' + newConvId)
+        }
+    } catch (e) {
+        console.error('[Fork] failed:', e)
+        alert('分叉对话失败: ' + e.message)
+    }
+}
+
 // ─── Fake search detection ───
 // Detects when AI says it will search but doesn't actually call the tool
+// ═══ Tool Progress Labels — one-line status for every tool ═══
+// Mirrors the "🔍 搜索中: ..." pattern that web_search already has.
+// Each tool gets an emoji + action description + key detail from args.
+function toolProgressLabel(name, args) {
+  const a = args || {}
+  switch (name) {
+    case 'web_search':        return `🔍 搜索中: ${(a.query || '').slice(0, 60)}`
+    case 'web_fetch':         return `🌐 抓取网页: ${(a.url || '').slice(0, 60)}`
+    case 'get_weather':       return `🌤️ 查询天气: ${a.city || ''}`
+    case 'save_file':         return `💾 保存文件: ${a.filename || ''}`
+    case 'svg_to_image':      return `🖼️ SVG转图片: ${a.filename || ''}`
+    case 'create_zip':        return `📦 打包压缩: ${a.filename || (a.files?.length ? a.files.length + '个文件' : '')}`
+    case 'create_gif':        return `🎞️ 生成GIF: ${a.filename || ''}`
+    case 'create_document':   return `📄 生成文档: ${a.filename || ''}`
+    case 'create_pdf':        return `📕 生成PDF: ${a.filename || ''}`
+    case 'create_audio':      return `🔊 生成音频: ${a.filename || ''}`
+    case 'convert':           return `🔄 格式转换: ${a.direction || ''}`
+    case 'save_to_collection':return `📁 收藏内容: ${(a.collection_name || '全局收藏').slice(0, 30)}`
+    case 'rename_collection': return `✏️ 重命名收藏夹`
+    case 'move_last_saved':   return `📋 移动收藏`
+    case 'update_last_saved': return `📝 更新收藏`
+    case 'delete_last_saved': return `🗑️ 删除收藏`
+    case 'list_collections':  return `📂 列出收藏夹`
+    case 'system_info':       return `🖥️ 获取系统信息`
+    case 'list_directory':    return `📂 浏览目录: ${(a.path || '').slice(0, 50)}`
+    case 'read_file':         return `📖 读取文件: ${(a.filePath || a.path || '').slice(0, 50)}`
+    case 'deliver_file':      return `📎 投递文件: ${(a.filePath || '').slice(0, 50)}`
+    case 'analyze_disk':      return `💿 分析磁盘: ${(a.scanPath || '').slice(0, 50)}`
+    case 'search_files':      return `🔎 搜索文件: ${(a.query || a.pattern || '').slice(0, 50)}`
+    case 'send_email':        return `📧 发送邮件: ${(a.subject || '').slice(0, 40)}`
+    case 'schedule_email':    return `⏰ 定时邮件: ${(a.subject || '').slice(0, 40)}`
+    case 'search_image':      return `🖼️ 搜索图片: ${(a.query || '').slice(0, 40)}`
+    case 'ask_user_choice':   return `❓ 等待用户选择: ${(a.prompt || '').slice(0, 40)}`
+    case 'fill_word_template':return `📋 填充模板: ${a.filename || ''}`
+    case 'parse_word_template':return `🔍 解析模板: ${a.filename || ''}`
+    default:                  return `⚙️ 执行: ${name}`
+  }
+}
+
+// Show tool progress in the streaming text (non-destructive: saves current text, appends label)
+function showToolProgress(chatStore, name, args, tempId) {
+  const msg = chatStore.messagesMap[chatStore.currentId]?.find(m => m.id === tempId)
+  const currentText = msg?.text || ''
+  const label = toolProgressLabel(name, args)
+  // If current text already has this label (from server-side searching event), don't duplicate
+  if (currentText.includes(label)) return
+  // Append progress line — clear and concise, like the search indicator
+  const newText = currentText
+    ? currentText + '\n\n' + label + '...'
+    : label + '...'
+  chatStore.appendStreamText(tempId, newText)
+}
+
 function detectFakeSearch(text) {
     if (!text) return null
     // Length gate: long responses are REAL, not fake searches. Only short "让我搜一下..." cop-outs trigger this.
@@ -3108,6 +3461,13 @@ async function handleSearchFiles(args) {
       return JSON.stringify({ status: 'ok', count: 0, results: '(未找到匹配文件)', hint: data.hint })
     }
 
+    // ═══ Multiple matches → show inline confirmation card ═══
+    // When 2+ files match, inject a confirmation dialog into the AI message
+    // so the user can pick which file(s) they meant. This is the "弹出个框问用户是不是这些" behavior.
+    if (data.count > 1 && data.results.length > 1) {
+      handleFileConfirmation(store.streamingId, data.results, 'select')
+    }
+
     // Keep results compact to avoid blowing up the context
     const MAX_SHOW = 25
     const results = data.results.slice(0, MAX_SHOW).map((r, i) => {
@@ -3117,15 +3477,172 @@ async function handleSearchFiles(args) {
       return `${i + 1}. ${typeLabel} ${r.name}  ${sizeLabel}  ${timeLabel}\n   ${r.path}`
     }).join('\n')
     const extra = data.count > MAX_SHOW ? `\n\n... 还有 ${data.count - MAX_SHOW} 个匹配结果未列出。如需精确查找，请让用户指定更具体的关键词或盘符。` : ''
+    const confirmHint = data.count > 1 ? '\n\n[已展示选择卡片，等待用户确认要操作的文件]' : ''
 
     return JSON.stringify({
       status: 'ok',
       count: data.count,
       truncated: data.truncated || false,
       hint: data.hint,
-      results: results + extra
+      results: results + extra + confirmHint
     })
   } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
+}
+
+// ═══ Image library search (图文并发) ═══
+// Searches Wikimedia Commons (free, no API key) and injects images into the AI message
+async function handleSearchImage(args, tempId) {
+  try {
+    const limit = Math.min(args.limit || 3, 6)
+    let results = []
+    try {
+      results = await searchImageLibrary(args.query, limit)
+    } catch (apiErr) {
+      // Fallback: build Pollinations URLs directly if API route fails
+      console.warn('[search_image] API failed, falling back to direct URLs:', apiErr.message)
+      const enc = encodeURIComponent(args.query)
+      const baseSeed = Math.abs(args.query.split('').reduce((h, c) => ((h << 5) + h + c.charCodeAt(0)) | 0, 5381))
+      for (let i = 0; i < limit; i++) {
+        const seed = (baseSeed + i * 7919) % 1000000
+        results.push({
+          id: `img_${seed}`,
+          url: `https://image.pollinations.ai/prompt/${enc}?width=1024&height=1024&seed=${seed}&nologo=true`,
+          title: `${args.query} #${i + 1}`,
+          license: 'Pollinations (免费可商用)',
+        })
+      }
+    }
+    if (!results || results.length === 0) {
+      // Last resort: generate at least one image directly
+      const enc = encodeURIComponent(args.query)
+      results = [{
+        id: `img_fallback`,
+        url: `https://image.pollinations.ai/prompt/${enc}?width=1024&height=1024&seed=${Math.floor(Math.random() * 1000000)}&nologo=true`,
+        title: args.query,
+        license: 'Pollinations (免费可商用)',
+      }]
+    }
+    // Inject images into the streaming message so they render inline
+    const streamMsg = store._findStreamMsg(tempId)
+    if (streamMsg?.msg) {
+      if (!streamMsg.msg._imageGallery) streamMsg.msg._imageGallery = []
+      for (const r of results) {
+        if (!streamMsg.msg._imageGallery.some(g => g.url === r.url)) {
+          streamMsg.msg._imageGallery.push(r)
+        }
+      }
+    }
+    const summary = results.map((r, i) =>
+      `${i + 1}. ${r.title}${r.artist ? ' (' + r.artist + ')' : ''} — ${r.license}`
+    ).join('\n')
+    return JSON.stringify({
+      status: 'ok',
+      count: results.length,
+      query: args.query,
+      images: results.map(r => ({ url: r.url, title: r.title, license: r.license })),
+      message: `找到 ${results.length} 张相关图片，已在聊天中展示。图片信息：\n${summary}`
+    })
+  } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
+}
+
+// ═══ Canvas collaborative editing handlers ═══
+// User edited content in CodePanel — update the tab and mark conversation
+function handleCanvasUpdate({ index, code, tab }) {
+  if (codePanelTabs.value[index]) {
+    codePanelTabs.value[index].code = code
+    codePanelTabs.value[index]._dirty = false
+  }
+}
+
+// User asked AI to improve canvas content — send as a chat message with context
+function handleCanvasAskAI({ instruction, code, language, filename }) {
+  const prompt = `请改进以下${language ? ' ' + language : ''}代码${filename ? '（文件：' + filename + '）' : ''}。
+
+改进要求：${instruction}
+
+当前代码：
+\`\`\`${language}
+${code}
+\`\`\`
+
+请直接给出改进后的完整代码，并简要说明改了什么。`
+  // Send as a normal user message — AI will respond and the code panel will pick up the new code block
+  inputText.value = prompt
+  send()
+}
+
+// ═══ AI Image Generation (Pollinations — free, no API key) ═══
+async function handleGenerateImage(args, tempId) {
+  try {
+    const prompt = args.prompt || ''
+    if (!prompt) return JSON.stringify({ status: 'error', error: '图片描述为空' })
+    const w = args.width || 1024
+    const h = args.height || 1024
+    const seed = args.seed || Math.floor(Math.random() * 1000000)
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&seed=${seed}&model=flux&nologo=true`
+    // Inject image into the streaming message so it renders inline
+    const streamMsg = store._findStreamMsg(tempId)
+    if (streamMsg?.msg) {
+      if (!streamMsg.msg._imageGallery) streamMsg.msg._imageGallery = []
+      streamMsg.msg._imageGallery.push({ url, title: prompt, license: 'AI 生成 (FLUX)', generated: true, seed })
+    }
+    return JSON.stringify({
+      status: 'ok',
+      url,
+      prompt,
+      seed,
+      message: `图片已生成并在聊天中展示。描述：${prompt}。尺寸：${w}x${h}。如果用户不满意可以调整描述重新生成。`,
+    })
+  } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
+}
+
+// ═══ Interactive choice (Claude-style inline interaction) ═══
+// AI calls this when user's request has multiple options. Shows inline choice cards.
+async function handleAskUserChoice(args, tempId) {
+  try {
+    const choices = (args.choices || []).slice(0, 4)
+    if (choices.length === 0) {
+      return JSON.stringify({ status: 'error', error: '没有提供选项' })
+    }
+    // Inject the choice card into the message — user clicks to respond
+    const streamMsg = store._findStreamMsg(tempId)
+    if (streamMsg?.msg) {
+      streamMsg.msg._userChoice = {
+        prompt: args.prompt || '请选择',
+        choices: choices.map(c => ({ label: c.label || c.value, value: c.value || c.label, desc: c.desc || '' })),
+        multi: !!args.multi,
+        answered: false,
+        selected: null,
+      }
+    }
+    // Return a placeholder to the model — the follow-up turn will get the real answer
+    return JSON.stringify({
+      status: 'ok',
+      message: `已向用户展示选择卡片：${args.prompt}。等待用户选择后继续。`,
+      choices: choices.length,
+      waiting: true,
+    })
+  } catch (e) { return JSON.stringify({ status: 'error', error: e.message }) }
+}
+
+// ═══ File confirmation dialog (管理电脑 mode — path/natural language) ═══
+// When AI finds files via search_files and there are multiple matches, show a confirmation
+// card inline in the AI message. User confirms which files to use.
+async function handleFileConfirmation(tempId, files, action) {
+  // action: 'deliver' | 'email' | 'read'
+  const streamMsg = store._findStreamMsg(tempId)
+  if (streamMsg?.msg) {
+    streamMsg.msg._fileConfirm = {
+      files: files.slice(0, 10).map(f => ({
+        path: f.path, name: f.name, size: f.sizeDisplay || '',
+        type: f.type === 'directory' ? '文件夹' : (f.ext || '文件'),
+        mtime: f.mtime ? new Date(f.mtime).toLocaleDateString('zh-CN') : '',
+      })),
+      action,
+      confirmed: false,
+      selected: [],
+    }
+  }
 }
 
 async function handleWebFetch(url) {

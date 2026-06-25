@@ -172,9 +172,10 @@ function createConversation(req, res) {
 function updateConversation(req, res) {
   const c = conv.findById(req.params.id, req.user.id)
   if (!c) return sendError(res, '对话不存在', 'NOT_FOUND', 404)
-  const { title } = req.body
-  if (!title) return sendError(res, '缺少标题', 'BAD_REQUEST', 400)
-  conv.updateTitle(req.params.id, req.user.id, title)
+  const { title, folderId } = req.body
+  if (title) conv.updateTitle(req.params.id, req.user.id, title)
+  if (folderId !== undefined) conv.moveToFolder(req.params.id, req.user.id, folderId)
+  if (!title && folderId === undefined) return sendError(res, '缺少标题或文件夹', 'BAD_REQUEST', 400)
   sendSuccess(res, { ok: true })
 }
 
