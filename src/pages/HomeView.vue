@@ -268,10 +268,12 @@ async function quickStart() {
     const files = pendingFiles.value.map(f => ({ name: f.name, type: f.type, size: f.size, content: f.content || '' }))
     pendingFiles.value = []
     const id = 'conv_' + Date.now()
+    // ★ 必须在 createConversation 之前设置 _pendingAutoReply
+    //   因为 createConversation 里 this.currentId = id 是同步的，
+    //   Vue 会立即渲染 ChatView 并触发 onMounted，此时 flag 若未设置则跳过自动回复
+    store._pendingAutoReply = id
     await store.createConversation(id)
     await store.addUserMessage(text || t('fileText'), files)
-    // 必须在 addUserMessage 之后设置——确保 ChatView 检测时消息已入库
-    store._pendingAutoReply = id
     router.push('/chat/' + id)
   } catch (e) {
     store._pendingAutoReply = null

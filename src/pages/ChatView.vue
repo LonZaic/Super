@@ -673,15 +673,20 @@ onMounted(async () => {
                 // Already loading — might be a duplicate trigger, skip
                 console.warn('[AutoReply] already loading, skipping')
             } else {
-                // No user message found — might be a race condition, retry after short delay
-                console.warn('[AutoReply] no user message found, retrying in 300ms...')
-                await new Promise(r => setTimeout(r, 300))
-                const retryMsgs = store.messagesMap[targetId] || []
-                const retryLast = retryMsgs[retryMsgs.length - 1]
-                if (retryLast && retryLast.role === 'user' && !store.isLoadingFor(targetId)) {
-                    if (store.currentId !== targetId) await store.switchTab(targetId)
-                    callStreamAPI()
+                // No user message found — race condition with quickStart, retry with backoff
+                console.warn('[AutoReply] no user message found, retrying...')
+                // Try up to 3 times with increasing delays (200ms, 400ms, 800ms)
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    await new Promise(r => setTimeout(r, 200 * (1 << attempt)))
+                    const retryMsgs = store.messagesMap[targetId] || []
+                    const retryLast = retryMsgs[retryMsgs.length - 1]
+                    if (retryLast && retryLast.role === 'user' && !store.isLoadingFor(targetId)) {
+                        if (store.currentId !== targetId) await store.switchTab(targetId)
+                        callStreamAPI()
+                        return
+                    }
                 }
+                console.warn('[AutoReply] gave up after 3 retries')
             }
         })()
     }
