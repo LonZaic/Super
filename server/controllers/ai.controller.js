@@ -8,6 +8,24 @@ const { DEEPSEEK_API_BASE } = require('../config/constants')
 const config = require('../config')
 const { webSearchVerified } = require('../search')
 
+// AI 调用限额：每台电脑（按 IP）最多调用 AI N 次（自费限额，防刷爆）
+// 管理员账号（AI_ALLOWLIST_USERNAMES 中的用户）不限次数
+const AI_CALL_LIMIT = parseInt(process.env.AI_CALL_LIMIT, 10) || 10
+const AI_ALLOWLIST = (process.env.AI_ALLOWLIST_USERNAMES || 'lzl').split(',').map(s => s.trim().toLowerCase())
+const aiCallCounts = new Map()   // Map<ip, count>
+
+function checkAiLimit(req) {
+  // 管理员用户不限额
+  const username = String(req.user?.name || '').toLowerCase()
+  if (username && AI_ALLOWLIST.includes(username)) return true
+
+  const ip = req.ip || req.socket?.remoteAddress || '0.0.0.0'
+  let count = aiCallCounts.get(ip) || 0
+  if (count >= AI_CALL_LIMIT) return false
+  aiCallCounts.set(ip, count + 1)
+  return true
+}
+
 function getApiKey(req) {
   return config.deepseekApiKey || req.headers['x-api-key'] || ''
 }
@@ -41,6 +59,7 @@ async function executeSearchTool(tc) {
 
 // ─── Non-streaming chat ───
 async function chat(req, res) {
+  if (!checkAiLimit(req)) return sendError(res, `AI 调用次数已达上限（${AI_CALL_LIMIT}次），请联系管理员`, 'AI_LIMIT_EXCEEDED', 429)
   const { messages, model, ...rest } = req.body
   const apiKey = getApiKey(req)
 
@@ -278,6 +297,10 @@ async function streamWithToolHandling(messages, model, providedTools, apiKey, re
 
 // ─── Streaming chat ───
 async function chatStream(req, res) {
+  if (!checkAiLimit(req)) {
+    res.status(429).json({ error: `AI 调用次数已达上限（${AI_CALL_LIMIT}次），请联系管理员` })
+    return
+  }
   const { messages, model, tools, ...rest } = req.body
   const apiKey = getApiKey(req)
 
