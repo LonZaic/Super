@@ -624,14 +624,6 @@ async function fetchBalance() {
 }
 
 onMounted(async () => {
-    // Auto-trigger AI reply for conversations started from homepage
-    // This MUST run first — before any other init that might clear the pending flag
-    const pendingId = store._pendingAutoReply
-    const pendingAutoReply = pendingId && (pendingId === store.currentId || pendingId === route.params.id)
-    if (pendingAutoReply) {
-        store._pendingAutoReply = null
-    }
-
     // Always load API key — needed for streaming even if messages are already loaded
     store.loadApiKey()
 
@@ -656,40 +648,6 @@ onMounted(async () => {
 
     fetchBalance()
 
-    if (pendingAutoReply) {
-        // Use async IIFE to properly await switchTab before calling callStreamAPI
-        ;(async () => {
-            await nextTick()
-            const targetId = pendingId || store.currentId
-            // Ensure currentId is set to the pending conversation before streaming
-            if (store.currentId !== targetId) {
-                await store.switchTab(targetId)
-            }
-            const msgs = store.messagesMap[targetId] || []
-            const lastMsg = msgs[msgs.length - 1]
-            if (lastMsg && lastMsg.role === 'user' && !store.isLoadingFor(targetId)) {
-                callStreamAPI()
-            } else if (lastMsg && lastMsg.role === 'user' && store.isLoadingFor(targetId)) {
-                // Already loading — might be a duplicate trigger, skip
-                console.warn('[AutoReply] already loading, skipping')
-            } else {
-                // No user message found — race condition with quickStart, retry with backoff
-                console.warn('[AutoReply] no user message found, retrying...')
-                // Try up to 3 times with increasing delays (200ms, 400ms, 800ms)
-                for (let attempt = 0; attempt < 3; attempt++) {
-                    await new Promise(r => setTimeout(r, 200 * (1 << attempt)))
-                    const retryMsgs = store.messagesMap[targetId] || []
-                    const retryLast = retryMsgs[retryMsgs.length - 1]
-                    if (retryLast && retryLast.role === 'user' && !store.isLoadingFor(targetId)) {
-                        if (store.currentId !== targetId) await store.switchTab(targetId)
-                        callStreamAPI()
-                        return
-                    }
-                }
-                console.warn('[AutoReply] gave up after 3 retries')
-            }
-        })()
-    }
     initEmailScheduler()
 })
 
